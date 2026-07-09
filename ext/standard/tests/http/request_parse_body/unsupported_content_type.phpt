@@ -5,8 +5,8 @@ max_input_vars=1
 --ENV--
 REQUEST_METHOD=PUT
 --POST_RAW--
-Content-Type: application/json
-{"hello": "world"}
+Content-Type: text/plain
+hello world
 --FILE--
 <?php
 
@@ -20,7 +20,7 @@ var_dump($_POST, $_FILES);
 
 ?>
 --EXPECT--
-RequestParseBodyException: Content-Type "application/json" is not supported
+RequestParseBodyException: Content-Type "text/plain" is not supported
 array(0) {
 }
 array(0) {

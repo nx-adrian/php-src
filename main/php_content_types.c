@@ -13,6 +13,7 @@
 #include "php.h"
 #include "SAPI.h"
 #include "rfc1867.h"
+#include "ext/json/php_json.h"
 
 #include "php_content_types.h"
 
@@ -20,8 +21,53 @@
 static const sapi_post_entry php_post_entries[] = {
 	{ DEFAULT_POST_CONTENT_TYPE, sizeof(DEFAULT_POST_CONTENT_TYPE)-1, sapi_read_standard_form_data,	php_std_post_handler },
 	{ MULTIPART_CONTENT_TYPE,    sizeof(MULTIPART_CONTENT_TYPE)-1,    NULL,                         rfc1867_post_handler },
+	{ JSON_POST_CONTENT_TYPE,    sizeof(JSON_POST_CONTENT_TYPE)-1,    sapi_read_standard_form_data, php_json_post_handler },
 	{ NULL, 0, NULL, NULL }
 };
+/* }}} */
+
+/* {{{ SAPI_POST_HANDLER_FUNC */
+SAPI_API SAPI_POST_HANDLER_FUNC(php_json_post_handler)
+{
+	zval *arr = (zval *) arg;
+	php_stream *s = SG(request_info).request_body;
+	zend_string *body;
+	zval decoded;
+
+	if (!s || php_stream_rewind(s) != SUCCESS) {
+		return;
+	}
+
+	body = php_stream_copy_to_mem(s, PHP_STREAM_COPY_ALL, 0);
+	if (!body) {
+		return;
+	}
+
+	if (php_json_decode_ex(&decoded, ZSTR_VAL(body), ZSTR_LEN(body),
+			PHP_JSON_OBJECT_AS_ARRAY, PHP_JSON_PARSER_DEFAULT_DEPTH) == SUCCESS) {
+		if (Z_TYPE(decoded) == IS_ARRAY) {
+			zend_string *key;
+			zend_ulong idx;
+			zval *val;
+
+			/* Copy the top-level pairs into the $_POST array. Scalar
+			 * top-level values leave $_POST empty, and invalid JSON
+			 * degrades like unparsable form data: empty $_POST, raw body
+			 * still available via php://input. */
+			ZEND_HASH_FOREACH_KEY_VAL(Z_ARRVAL(decoded), idx, key, val) {
+				Z_TRY_ADDREF_P(val);
+				if (key) {
+					zend_symtable_update(Z_ARRVAL_P(arr), key, val);
+				} else {
+					zend_hash_index_update(Z_ARRVAL_P(arr), idx, val);
+				}
+			} ZEND_HASH_FOREACH_END();
+		}
+		zval_ptr_dtor(&decoded);
+	}
+
+	zend_string_release_ex(body, 0);
+}
 /* }}} */
 
 /* {{{ SAPI_POST_READER_FUNC */

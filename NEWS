@@ -3,6 +3,8 @@ PHP                                                                        NEWS
 ?? ??? ????, PHP 8.6.0alpha2
 
 - Core:
+  . Added support for populating $_POST from application/json request bodies.
+    (Adrian Testa-Avila)
   . Sync Boost.Context assembly with 1.91.0. (kn1g78)
   . Fixed bug GH-22387 (AST pretty-printing drops meaningful parentheses around
     RHS of instanceof). (timwolla)

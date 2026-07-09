@@ -221,6 +221,13 @@ PHP 8.6 UPGRADE NOTES
 ========================================
 
 - Core:
+  . POST requests with a Content-Type of application/json now populate $_POST
+    with the decoded body (objects decoded as arrays), analogous to
+    application/x-www-form-urlencoded and multipart/form-data requests.
+    Top-level JSON objects and arrays populate $_POST; invalid JSON or a
+    scalar top-level value leaves $_POST empty. The raw body remains
+    available via php://input, and enable_post_data_reading=0 disables the
+    behavior as for other content types.
   . It is now possible to use reference assign on WeakMap without the key
     needing to be present beforehand.
   . It is now possible to define the __debugInfo() magic method on enums.
