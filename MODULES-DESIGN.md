@@ -1146,3 +1146,32 @@ earlier class/type regressions green.
 **Remaining Feature-2/4 gaps unchanged.** Nested cross-file autoload still keys tier-1/tier-2
 off the first `::` (deferred to Feature 4); an ancestor module not yet loaded is not gated
 (same cross-file caveat).
+
+---
+
+## Increment: `use Module::Member` (Feature 2)
+
+**Goal:** let consuming code import a module member by name, `use Billing::Ledger;` (and
+`... as L;`, and chained `use Outer::Inner::Gadget;`), so the short alias resolves to the
+canonical `Module::Member`.
+
+**Grammar (`zend_language_parser.y`):** `use_declaration` gains two productions accepting the
+existing arbitrary-depth `module_qualified_name` nonterminal (with and without `T_AS`). Because
+the module-qualified name is reached only when a `::` follows the leading name — distinct from
+the `;`/`,`/`as` that follow a plain `legacy_namespace_name` — bison reports zero conflicts
+(`%expect 0` holds). No new AST: the USE_ELEM just carries the concatenated canonical name.
+
+**Default alias (`zend_compile.c`, `zend_get_unqualified_name`):** now splits on the rightmost
+of `\` or `::`, so `use Billing::Ledger` aliases `Ledger`, `use Billing::Auth\Checker` aliases
+`Checker`, and `use Outer::Inner::Gadget` aliases `Gadget`. The rest of `zend_compile_use` is
+unchanged: the alias→canonical entry lands in the class import table, and later bareword
+resolution expands the alias to `Billing::Ledger`, which flows through the normal module
+boundary / autoload / internal-gate machinery.
+
+**Pure aliasing.** `use` on an `internal` member is allowed and is not itself an access; the
+boundary is enforced only when the imported name is actually used from outside the module
+(runtime), consistent with the uniform-runtime rule. Verified in module_037.
+
+**Verified:** default and explicit aliases; namespaced module name (`VendorName\User::Profile`);
+chained nested import; alias in type hints and `instanceof`; internal import allowed but access
+denied. Test module_037. 39 module + 151 module/namespace regressions green.
