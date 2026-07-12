@@ -68,4 +68,4 @@ line
 made
 Shop::Secret
 Cannot access internal module member "Shop::Secret" from outside its module
-"Shop::Nope" is not a member of module "Shop"
+"Nope" is not a member of module "Shop"

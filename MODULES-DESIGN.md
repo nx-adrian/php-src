@@ -1786,7 +1786,7 @@ to autoload (the engine forbids autoload during compilation), so the fix is at r
 
 Net: identity is still ungated (`::class`, `instanceof`), `internal` members reached via a chain from
 outside give the clean `Cannot access internal module member` error, and a genuine typo/undefined member
-reports `"M::Foo" is not a member of module "M"` (see next section). **Verified:** new test `module_065`
+reports `"Foo" is not a member of module "M"` (see next section). **Verified:** new test `module_065`
 (cold-autoload of every chain form, inline + nested + split-file, plus enforcement/diagnostics);
 playground `module-playground/07_cold_static_chain/` (fails pre-fix, passes after). Full suite green:
 66 module tests, `Zend/tests` clean (only the pre-existing `arginfo_zpp_mismatch` failures), reflection
@@ -1798,8 +1798,10 @@ A reference to an undefined member of a module — a typo, or an unclaimed split
 via `::` — previously reported two different things for the same cause: a module known at compile time
 folded `M::Foo` to a class reference and failed with `Class "M::Foo" not found`, while an autoloaded
 module fell through the cold-path constant fetch to `Undefined constant M::Foo`. Both now report
-`"M::Foo" is not a member of module "M"` — the wording already used by the compile-time `module::Member`
-self-reference check (`zend_compile.c`). Two sites, each of which already has the module in hand:
+`"Foo" is not a member of module "M"` — naming the bare member and its module (not the canonical
+`M::Foo`, which would read as though the member should live at `M::M::Foo`). The compile-time
+`module::Member` self-reference check (`zend_compile.c`) is aligned to the same form. Three sites, each
+of which already has the bare member segment and the module in hand:
 - `report_class_fetch_error` (name-based class fetch — covers `M::Foo::…`, `new M::Foo`, types, …): when
   a not-found `Mod::Member` names a real `ZEND_ACC_MODULE` whose `Member` is not in the roster, emit the
   member message; a `Member` that *is* in the roster but failed to load stays `Class … not found` (a

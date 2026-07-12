@@ -1264,7 +1264,7 @@ static zend_string *zend_resolve_class_name(zend_string *name, uint32_t type) /*
 		if (!is_member) {
 			zend_error_noreturn(E_COMPILE_ERROR,
 				"\"%s\" is not a member of module \"%s\"",
-				ZSTR_VAL(canonical), ZSTR_VAL(mod));
+				ZSTR_VAL(name), ZSTR_VAL(mod));
 		}
 		return canonical;
 	}
