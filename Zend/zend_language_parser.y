@@ -1049,7 +1049,9 @@ class_statement:
 
 class_name_list:
 		class_name { $$ = zend_ast_create_list(1, ZEND_AST_NAME_LIST, $1); }
+	|	module_qualified_name { $$ = zend_ast_create_list(1, ZEND_AST_NAME_LIST, $1); }
 	|	class_name_list ',' class_name { $$ = zend_ast_list_add($1, $3); }
+	|	class_name_list ',' module_qualified_name { $$ = zend_ast_list_add($1, $3); }
 ;
 
 trait_adaptations:
