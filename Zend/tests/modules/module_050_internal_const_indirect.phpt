@@ -12,8 +12,10 @@ module M {
     internal class Sec { public const H = "secH"; }
     public const PUBPATH = "M::Pub";
     public const SECPATH = "M::Sec";   // a PUBLIC const holding an internal type's name
-    public static function insideDirect(): string { return Sec::H; }
-    public static function insideWalk(): string { return module::SECPATH::H; }
+    public class Api {
+        public static function insideDirect(): string { return Sec::H; }
+        public static function insideWalk(): string { $c = module::SECPATH; return $c::H; }
+    }
 }
 class X { const Y = 'Z'; }
 class Z { const W = "zw"; }
@@ -29,8 +31,8 @@ echo M::PUBPATH::K, "\n";
 echo X::Y::W, "\n";
 
 // Same-module internal access works.
-echo M::insideDirect(), "\n";
-echo M::insideWalk(), "\n";
+echo M::Api::insideDirect(), "\n";
+echo M::Api::insideWalk(), "\n";
 
 // Internal denied from outside through every route.
 deny('direct M::Sec::H',      fn() => M::Sec::H);

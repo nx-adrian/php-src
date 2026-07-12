@@ -6,14 +6,12 @@ module Billing {
     internal const SECRET = 42;
     public const OPEN = 1;
 
-    public static function reveal(): int { return module::SECRET; }   // inside via module::
     public class Reader {
         public function read(): int { return module::SECRET; }         // inside a member class
     }
 }
 
 // Allowed from inside the module
-echo Billing::reveal(), "\n";                       // 42
 echo (new Billing::Reader())->read(), "\n";         // 42
 echo Billing::OPEN, "\n";                            // 1 (public, from outside)
 
@@ -29,7 +27,6 @@ try { echo constant("Billing::SECRET"); } catch (\Error $e) { echo $e->getMessag
 echo "reflection: ", (new ReflectionClassConstant("Billing", "SECRET"))->getValue(), "\n";
 ?>
 --EXPECT--
-42
 42
 1
 static: Cannot access internal module constant Billing::SECRET from outside its module

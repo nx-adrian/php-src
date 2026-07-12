@@ -9,14 +9,16 @@ or a module could throw an exception type no external caller can name and catch.
 <?php
 module Bank {
     internal class Overdraft extends \RuntimeException {}
-    public static function withdraw(int $cents): void {
-        if ($cents > 100) { throw new module::Overdraft("insufficient funds"); }
+    public class Api {
+        public static function withdraw(int $cents): void {
+            if ($cents > 100) { throw new module::Overdraft("insufficient funds"); }
+        }
     }
 }
 
 // Identity/observation of the internal type from outside is allowed:
 try {
-    Bank::withdraw(500);
+    Bank::Api::withdraw(500);
     echo "no throw\n";
 } catch (Bank::Overdraft $e) {                 // catch by the internal name -> works
     echo "caught: ", $e->getMessage(), "\n";
@@ -26,7 +28,7 @@ try {
 
 // A union catch mixing the internal type with a global one still works:
 try {
-    Bank::withdraw(500);
+    Bank::Api::withdraw(500);
 } catch (\LogicException | Bank::Overdraft $e) {
     echo "union caught: ", get_class($e), "\n";
 }

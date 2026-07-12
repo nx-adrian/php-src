@@ -10766,27 +10766,25 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 				continue;
 			}
 
-			/* Module-level static functions become static methods of the backing
-			 * class. An `internal` one carries ZEND_ACC_MODULE_INTERNAL, enforced by
-			 * the existing static-method dispatch gate (zend_std_get_static_method ->
-			 * zend_module_scope_allows). */
+			/* Module-level `static` functions and properties are deferred to a future
+			 * proposal (module state / instantiable modules — see Future Scope). The
+			 * grammar and the whole implementation (backing-class members, module::f() /
+			 * module::$x resolution, ReflectionModule::getFunctions) remain intact; they
+			 * are simply gated here at the one point where such a member is registered, so
+			 * re-enabling is deleting this block. Module *constants*, member classes,
+			 * interfaces, enums, traits, and nested modules are unaffected. The backing
+			 * class is still created (module identity), just without these members. */
 			if (decl->kind == ZEND_AST_METHOD) {
-				if (visibility == ZEND_MODULE_MEMBER_INTERNAL) {
-					((zend_ast_decl *) decl)->flags |= ZEND_ACC_MODULE_INTERNAL;
-				}
-				backing_stmts = zend_ast_list_add(backing_stmts, decl);
-				continue;
+				zend_error_noreturn(E_COMPILE_ERROR,
+					"Module-level static functions are not supported "
+					"(deferred to a future proposal); a module may declare classes, "
+					"interfaces, enums, traits, constants, and nested modules");
 			}
-
-			/* Module-level static properties become static properties of the backing
-			 * class. An `internal` one carries the low-bit member flag (bit 14, which
-			 * fits the 16-bit prop-group attr), gated in the static-property fetch path. */
 			if (decl->kind == ZEND_AST_PROP_GROUP) {
-				if (visibility == ZEND_MODULE_MEMBER_INTERNAL) {
-					decl->attr |= ZEND_ACC_MODULE_INTERNAL_MEMBER;
-				}
-				backing_stmts = zend_ast_list_add(backing_stmts, decl);
-				continue;
+				zend_error_noreturn(E_COMPILE_ERROR,
+					"Module-level static properties are not supported "
+					"(deferred to a future proposal); a module may declare classes, "
+					"interfaces, enums, traits, constants, and nested modules");
 			}
 
 			/* Record the member's canonical name -> visibility before compiling, so

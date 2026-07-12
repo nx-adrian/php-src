@@ -8,7 +8,6 @@ module Outer {
 
     public module Inner {
         public const IV = "inner";
-        public static function make(): string { return "inner-make"; }
         public class Gadget {
             public function who(): string { return "gadget"; }
             public static function tag(): string { return "g"; }
@@ -25,7 +24,6 @@ var_dump(class_exists("Outer::Inner"));
 
 // Nested module-level members via chained "::"
 echo Outer::Inner::IV, "\n";
-echo Outer::Inner::make(), "\n";
 
 // Nested member class: static access via chain, and direct instantiation through
 // the multi-"::" class reference "new Outer::Inner::Gadget".
@@ -41,7 +39,6 @@ outer
 bool(true)
 bool(true)
 inner
-inner-make
 g
 gadget
 Outer::Inner :: Outer::Inner::Gadget

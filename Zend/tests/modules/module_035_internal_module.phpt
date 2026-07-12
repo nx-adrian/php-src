@@ -9,17 +9,20 @@ module Outer {
 
     internal module Inner {
         public const IV = "iv";
-        public static function make(): string { return "made"; }
         public class Gadget { public function who(): string { return "gadget"; } }
         internal class Hidden { public function h(): string { return "hidden"; } }
 
-        // Within Inner, its own internal member is reachable.
-        public static function reachHidden(): string { return (new module::Hidden)->h(); }
+        public class Api {
+            public static function make(): string { return "made"; }
 
-        // Inner reaching UP into Outer's own internal member must be denied.
-        public static function reachUp(): string {
-            try { return (new \Outer::OuterSecret)->s() . " LEAKED"; }
-            catch (\Error $e) { return $e->getMessage(); }
+            // Within Inner, its own internal member is reachable.
+            public static function reachHidden(): string { return (new module::Hidden)->h(); }
+
+            // Inner reaching UP into Outer's own internal member must be denied.
+            public static function reachUp(): string {
+                try { return (new \Outer::OuterSecret)->s() . " LEAKED"; }
+                catch (\Error $e) { return $e->getMessage(); }
+            }
         }
     }
 
@@ -27,31 +30,33 @@ module Outer {
     // because Inner is internal to Outer, not to itself.
     public class Sibling {
         public function reach(): string {
-            return module::Inner::IV . "/" . module::Inner::make()
+            return module::Inner::IV . "/" . module::Inner::Api::make()
                  . "/" . (new module::Inner::Gadget)->who();
         }
     }
 
-    public static function fromOuter(): string {
-        return (new module::Sibling)->reach() . "/" . module::Inner::reachHidden();
-    }
-    // Driven from Outer's scope (which may see Inner); reachUp then runs in Inner's scope.
-    public static function reachUpProbe(): string {
-        return module::Inner::reachUp();
+    public class Main {
+        public static function fromOuter(): string {
+            return (new module::Sibling)->reach() . "/" . module::Inner::Api::reachHidden();
+        }
+        // Driven from Outer's scope (which may see Inner); reachUp then runs in Inner's scope.
+        public static function reachUpProbe(): string {
+            return module::Inner::Api::reachUp();
+        }
     }
 }
 
 // From inside Outer: the internal module and its members are fully usable.
-echo "inside: ", Outer::fromOuter(), "\n";
+echo "inside: ", Outer::Main::fromOuter(), "\n";
 
 // Non-transitivity: Inner's own code cannot reach Outer's other internal members.
-echo "reachUp: ", Outer::reachUpProbe(), "\n";
+echo "reachUp: ", Outer::Main::reachUpProbe(), "\n";
 
 // From outside Outer: every path into the internal module is denied — even its
 // PUBLIC members (const, static function, member class, static-on-member).
 $probes = [
     'const'      => fn() => Outer::Inner::IV,
-    'static-fn'  => fn() => Outer::Inner::make(),
+    'static-fn'  => fn() => Outer::Inner::Api::make(),
     'new-member' => fn() => new Outer::Inner::Gadget(),
     'static-on'  => fn() => Outer::Inner::Gadget::who(),
 ];
@@ -72,7 +77,7 @@ echo "reflect: ", $r->getName(), "\n";
 inside: iv/made/gadget/hidden
 reachUp: Cannot access internal module member "Outer::OuterSecret" from outside its module
 const: Cannot access internal module member "Outer::Inner" from outside its module
-static-fn: Cannot access internal module member "Outer::Inner" from outside its module
+static-fn: Cannot access internal module member "Outer::Inner::Api" from outside its module
 new-member: Cannot access internal module member "Outer::Inner::Gadget" from outside its module
 static-on: Cannot access internal module member "Outer::Inner::Gadget" from outside its module
 hidden: Cannot access internal module member "Outer::Inner::Hidden" from outside its module
