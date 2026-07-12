@@ -1680,3 +1680,23 @@ This is an independent correctness fix, but it also removes the one shift/reduce
 would otherwise surface when member visibility is made optional: a nullable `member_visibility`
 makes `public` ambiguous between the visibility keyword and a claim *named* `public`, and that
 ambiguity only exists because claims accepted `semi_reserved` names in the first place.
+
+## Optional module-member visibility (default public)
+
+Inside a `module { }` block, visibility is now OPTIONAL and defaults to `public`. An unmarked
+inline member (class / interface / trait / enum / const / static function / static property /
+nested module) and an unmarked body-less claim are public; `internal` must be written
+explicitly. The rule is keyed on the block boundary: unmarked *inside* the block is public,
+while an unclaimed split-file body (outside the block) is still `internal` by default — that
+default lives in the compiler's reconciliation and is unchanged.
+
+Grammar: `member_visibility` gains an `%empty` alternative yielding ZEND_MODULE_MEMBER_PUBLIC.
+This stays at `%expect 0` only because claim names were first restricted to `namespace_name`
+(previous entry); otherwise a nullable visibility makes `public` ambiguous between the keyword
+and a claim literally named `public`.
+
+Enforcement and compiler paths are untouched — public is the "no gate" case, so a
+defaulted-public member behaves exactly like an explicit one (reflection reports it `public`,
+`isModuleInternal() === false`). A lone visibility keyword with no member (`public;`) is still
+a ParseError. Tests: module_060 (inline, every kind), module_061 (split-file bare claim),
+module_003b repurposed (bare nested module defaults public).

@@ -1528,9 +1528,17 @@ module_member_list:
 ;
 
 member_visibility:
-		T_PUBLIC	{ $$ = ZEND_MODULE_MEMBER_PUBLIC; }
+		%empty		{ $$ = ZEND_MODULE_MEMBER_PUBLIC; }
+	|	T_PUBLIC	{ $$ = ZEND_MODULE_MEMBER_PUBLIC; }
 	|	T_INTERNAL	{ $$ = ZEND_MODULE_MEMBER_INTERNAL; }
 ;
+	/* PHP Modules: visibility is OPTIONAL on the members of a module definition block and
+	 * defaults to `public`. The rule is keyed on the block: inside `module { }` an unmarked
+	 * member (inline declaration or body-less claim) is public; `internal` must be written
+	 * explicitly. This does not touch split-file bodies — an unclaimed membership-file symbol
+	 * is still `internal` by default (that default lives in the compiler's reconciliation, not
+	 * here). Nullable visibility is conflict-free only because claim names are `namespace_name`
+	 * (no semi_reserved), so `public` can never be both a visibility keyword and a claim name. */
 
 module_member:
 		module_member_inner
