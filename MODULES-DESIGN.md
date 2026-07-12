@@ -1325,3 +1325,39 @@ module_039 uses the `::` form. 42 module tests green.
 Remaining nested-split gap (unchanged): a *body-less nested-module claim* `public module Inner;`
 inside a definition still does not parse (only `public module Inner { … }`), so a nested
 module's own definition cannot yet be forward-declared for splitting — only its member bodies.
+
+---
+
+## Increment: nested-module claim + one-membership-per-file (user-directed)
+
+**One membership per file.** Chained membership (`module Outer; module Inner;`) is now a
+compile-time error — a file joins a nested module directly with `module Outer::Inner;`. The
+guard is `!stmt_ast && parent_module` in `zend_compile_module` (a body-less membership whose
+parent context was already set by a prior membership). It deliberately does NOT fire for a
+membership followed by a nested-module definition *block* (`module Outer; module Inner { … }`,
+stmt_ast non-NULL) — that inline-definition form stays valid.
+
+**Body-less nested-module claim `public module Inner;`.** A module's definition can now
+forward-declare a nested module (defined in its own file), mirroring the class claim:
+- Grammar: `member_visibility T_MODULE namespace_declaration_name ';'` -> a `ZEND_AST_MODULE`
+  with a NULL member list (distinguishes it from the block form). `%expect 0` holds.
+- Member loop registers the nested module's canonical name -> visibility in the parent's
+  member table + roster (no backing class created here; `FC(current_module)` untouched).
+- `zend_compile_module` reconciles a nested module's own visibility: when a nested module is
+  defined outside its parent's block (standalone), it looks its canonical name up in the parent
+  module's claim table and inherits `internal` — so a split-out `internal module Priv` enforces.
+
+**Standalone `::` definition block.** For symmetry with `module Outer::Inner;` membership, a
+nested module may be defined standalone by its canonical name: `module Outer::Inner { … }`.
+Both standalone `::` forms (membership and definition) are top-level only; `::` remains
+unreachable inside a `module { … }` block (verified: ParseError).
+
+**Verified (module_041):** claim (`public module Pub; internal module Priv;`) + split
+definitions; ReflectionModule getModules/getSymbolVisibility report them; public reachable;
+internal denied outside; chained membership blocked. 43 module + 156 module/ns tests green.
+
+**Noted anomaly (not yet addressed):** a static call to an internal nested module's method from
+*outside* (`Outer::Priv::reach()` where Priv is internal) reports "Undefined constant
+Outer::Priv" rather than a clean internal-access `Error` — the chain reinterpretation appears
+to bail before the visibility gate. Class instantiation of an internal nested member IS denied
+cleanly; only this static-call-from-outside path mis-reports. Follow-up.

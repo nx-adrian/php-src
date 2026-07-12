@@ -10515,6 +10515,19 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 	 * outer. The enclosing module scope is saved and restored around the nested block
 	 * so declarations after it stay owned by the outer module. */
 	zend_string *parent_module = FC(current_module);   /* borrowed; NULL at top level */
+
+	/* A file may declare membership in exactly one module. Chained membership
+	 * ("module Outer; module Inner;") is rejected — join a nested module directly with
+	 * "module Outer::Inner;". A membership followed by a nested-module *definition block*
+	 * ("module Outer; module Inner { … }") is not this case (stmt_ast is non-NULL): that
+	 * is an inline definition, which remains valid. */
+	if (!stmt_ast && parent_module) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"This file already declares membership in module \"%s\"; join a nested module "
+			"directly with \"module %s::%s;\" instead of a second module statement",
+			ZSTR_VAL(parent_module), ZSTR_VAL(parent_module), ZSTR_VAL(raw_name));
+	}
+
 	zend_string *name;                                 /* owned; released at function end */
 	if (parent_module) {
 		name = zend_string_concat3(
@@ -10537,6 +10550,34 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 	zend_string_release(lc_name);
 
 	zend_php_module *mod = zend_register_module(name);
+
+	/* A nested module defined outside its parent's block — a standalone file
+	 * ("module Outer::Inner { … }") or a membership + block ("module Outer; module
+	 * Inner { … }") — carries no FC(current_member_internal) signal. Inherit its
+	 * visibility from the enclosing module's claim ("internal module Inner;"), keyed by
+	 * this module's canonical name in the parent module's member table. */
+	if (!module_is_internal) {
+		const char *nv = ZSTR_VAL(name);
+		const char *last_sep = NULL;
+		for (const char *p = nv; (p = strstr(p, "::")) != NULL; p += 2) {
+			last_sep = p;
+		}
+		if (last_sep) {
+			size_t plen = (size_t)(last_sep - nv);
+			zend_string *lc_parent = zend_string_alloc(plen, 0);
+			zend_str_tolower_copy(ZSTR_VAL(lc_parent), nv, plen);
+			zend_string *lc_self = zend_string_tolower(name);
+			zend_php_module *pm = zend_lookup_module(lc_parent);
+			if (pm) {
+				void *vis = zend_hash_find_ptr(&pm->members, lc_self);
+				if (vis && (uintptr_t) vis == ZEND_MODULE_MEMBER_INTERNAL) {
+					module_is_internal = true;
+				}
+			}
+			zend_string_release(lc_parent);
+			zend_string_release(lc_self);
+		}
+	}
 
 	FC(current_module) = zend_string_copy(name);
 
@@ -10568,6 +10609,27 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 			 * when it compiles (zend_compile_class_decl looks the claim up by canonical
 			 * name). The name may be namespaced, matching a sub-file's internal namespace. */
 			if (decl->kind == ZEND_AST_MODULE_CLAIM) {
+				zend_string *simple = zend_ast_get_str(decl->child[0]);
+				zend_string *canonical = zend_string_concat3(
+					ZSTR_VAL(name), ZSTR_LEN(name), "::", 2,
+					ZSTR_VAL(simple), ZSTR_LEN(simple));
+				zend_string *lc = zend_string_tolower(canonical);
+				zend_hash_update_ptr(&mod->members, lc, (void*)(uintptr_t) visibility);
+				zval vzv;
+				ZVAL_LONG(&vzv, (zend_long) visibility);
+				zend_hash_update(roster, lc, &vzv);
+				zend_string_release(canonical);
+				zend_string_release(lc);
+				continue;
+			}
+
+			/* A body-less claim of a NESTED MODULE ("public module Inner;"): a
+			 * ZEND_AST_MODULE with a NULL member list. Record the nested module's
+			 * canonical name -> visibility, exactly like a class claim; its definition
+			 * (backing class + members) lives in its own file and inherits this
+			 * visibility (zend_compile_module looks the claim up by canonical name). No
+			 * backing class is created here, and FC(current_module) is untouched. */
+			if (decl->kind == ZEND_AST_MODULE && decl->child[1] == NULL) {
 				zend_string *simple = zend_ast_get_str(decl->child[0]);
 				zend_string *canonical = zend_string_concat3(
 					ZSTR_VAL(name), ZSTR_LEN(name), "::", 2,
