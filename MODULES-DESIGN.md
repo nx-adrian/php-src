@@ -1278,3 +1278,26 @@ regenerate it from the stub. Updated `ReflectionClass_toString_001` for the new 
 **Verified (module_040):** every ReflectionModule accessor returns the correct partition;
 `isModuleInternal` is true for internal class/method/property/constant and false for public
 ones and for non-module symbols. 43 module + 508 reflection-suite tests green.
+
+---
+
+## Investigated but deferred: asymmetric `internal(set)` (RFC audit follow-up)
+
+The RFC's "Integration with Existing Features" shows `public internal(set) $x` — readable per
+its get visibility, settable only from same-module code. Investigated for the PoC; the
+*enforcement* is trivial (in `zend_asymmetric_property_has_set_access`, an `internal(set)`
+property would just return `zend_module_scope_allows(prop_info->ce, scope)`), and a free
+property flag bit exists (bit 13). But the plumbing is **cross-cutting, not straightforward**:
+
+- Set-visibility is assumed to be exactly one of public/protected/private in ~10 write-gate
+  detection sites (`zend_object_handlers.c`, `zend_execute.c`) plus several enumeration/assert
+  points that would fire for a fourth kind — e.g. `zend_execute.c` has
+  `ZEND_ASSERT(prop_info->flags & ZEND_ACC_PROTECTED_SET)` in the `else` of a private/protected
+  branch, and `zend_ast.c` / `zend_inheritance.c` enumerate the same trichotomy.
+- A new lexer token `T_INTERNAL_SET` (for `internal(set)`) plus parser %token, grammar
+  `member_modifier`, and `zend_modifier_token_to_flag` / `zend_add_member_modifier` handling.
+- Inheritance compatibility rules for set-visibility would need an `internal(set)` case.
+
+That is a real language-feature addition touching hot property-write paths with assertion risk,
+not a contained change. **Deferred as pending work.** The RFC keeps it as intended design; the
+PoC does not implement it (symmetric `internal` on properties — module_027 — does work).
