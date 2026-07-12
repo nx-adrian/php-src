@@ -2953,9 +2953,69 @@ static inline void zend_set_class_name_op1(zend_op *opline, znode *class_node) /
 }
 /* }}} */
 
+/* PHP Modules: chained "Module::Class::member". The parser nests the class part as a
+ * class-constant fetch ("A::B") used as the class expression of the outer access. If
+ * "A::B" names a module member class (its module A is known, so "A::B" is a canonical
+ * member-class key), rewrite the class operand into a direct FQ reference to "A::B" so
+ * the outer access resolves against that class rather than evaluating "A::B" as a
+ * constant. Returns the canonical class name (owned) to use as the class, or NULL to
+ * leave the operand as-is (preserving stock "Class::CONST::…" dynamic-class semantics
+ * and cross-file cases). */
+static zend_string *zend_try_module_chain_class(zend_ast *class_ast) /* {{{ */
+{
+	if (class_ast->kind != ZEND_AST_CLASS_CONST) {
+		return NULL;
+	}
+	zend_ast *lead_ast = class_ast->child[0];
+	zend_ast *member_ast = class_ast->child[1];
+	if (lead_ast->kind != ZEND_AST_ZVAL || member_ast->kind != ZEND_AST_ZVAL) {
+		return NULL;
+	}
+	zval *lead_zv = zend_ast_get_zval(lead_ast);
+	zval *member_zv = zend_ast_get_zval(member_ast);
+	if (Z_TYPE_P(lead_zv) != IS_STRING || Z_TYPE_P(member_zv) != IS_STRING
+	 || zend_get_class_fetch_type(Z_STR_P(lead_zv)) != ZEND_FETCH_CLASS_DEFAULT) {
+		return NULL;
+	}
+	/* Resolve the leading segment as a class name (module/namespace aware). */
+	zend_string *lead = zend_resolve_class_name(Z_STR_P(lead_zv), lead_ast->attr);
+
+	/* Reinterpret only when the leading segment is genuinely a module — either its
+	 * backing class is visible (preloaded / same file, ZEND_ACC_MODULE) or the module
+	 * is registered this compilation. Otherwise leave stock semantics untouched. */
+	zend_string *lead_lc = zend_string_tolower(lead);
+	bool is_module = false;
+	zend_class_entry *lce = zend_hash_find_ptr(CG(class_table), lead_lc);
+	if (lce && (lce->ce_flags & ZEND_ACC_MODULE)) {
+		is_module = true;
+	} else if (zend_lookup_module(lead_lc)) {
+		is_module = true;
+	}
+	zend_string_release(lead_lc);
+
+	if (!is_module) {
+		zend_string_release(lead);
+		return NULL;
+	}
+	zend_string *canonical = zend_string_concat3(
+		ZSTR_VAL(lead), ZSTR_LEN(lead), "::", 2,
+		ZSTR_VAL(Z_STR_P(member_zv)), ZSTR_LEN(Z_STR_P(member_zv)));
+	zend_string_release(lead);
+	return canonical;
+}
+/* }}} */
+
 static void zend_compile_class_ref(znode *result, zend_ast *name_ast, uint32_t fetch_flags) /* {{{ */
 {
 	uint32_t fetch_type;
+
+	zend_string *module_chain = zend_try_module_chain_class(name_ast);
+	if (module_chain) {
+		/* Canonical member-class name; treat as a fully-qualified class reference. */
+		result->op_type = IS_CONST;
+		ZVAL_STR(&result->u.constant, module_chain);
+		return;
+	}
 
 	if (name_ast->kind != ZEND_AST_ZVAL) {
 		znode name_node;
