@@ -1227,18 +1227,28 @@ static zend_string *zend_resolve_class_name(zend_string *name, uint32_t type) /*
 		zend_string *mod = FC(current_module);
 		zend_string *canonical = zend_string_concat3(
 			ZSTR_VAL(mod), ZSTR_LEN(mod), "::", 2, ZSTR_VAL(name), ZSTR_LEN(name));
+		/* The member may itself be a chain ("module::Inner::Gadget" -> canonical
+		 * "Outer::Inner::Gadget"). Its owning module is everything before the last
+		 * "::" (here "Outer::Inner"), which for the single-segment case degrades to
+		 * the enclosing module itself. Verify membership against that owner. */
+		const char *cval = ZSTR_VAL(canonical);
+		const char *last_sep = NULL;
+		for (const char *p = cval; (p = strstr(p, "::")) != NULL; p += 2) {
+			last_sep = p;
+		}
+		ZEND_ASSERT(last_sep && "canonical always contains at least one \"::\"");
+		size_t owner_len = (size_t)(last_sep - cval);
 		zend_string *lc_canonical = zend_string_tolower(canonical);
-		zend_string *lc_mod = zend_string_tolower(mod);
-		zend_php_module *m = zend_lookup_module(lc_mod);
+		zend_string *lc_owner = zend_string_alloc(owner_len, 0);
+		zend_str_tolower_copy(ZSTR_VAL(lc_owner), cval, owner_len);
+		zend_php_module *m = zend_lookup_module(lc_owner);
 		bool is_member = m && zend_hash_exists(&m->members, lc_canonical);
-		zend_string_release(lc_mod);
+		zend_string_release(lc_owner);
 		zend_string_release(lc_canonical);
 		if (!is_member) {
-			zend_string *dup = zend_string_copy(canonical);
-			zend_string_release(canonical);
 			zend_error_noreturn(E_COMPILE_ERROR,
 				"\"%s\" is not a member of module \"%s\"",
-				ZSTR_VAL(dup), ZSTR_VAL(mod));
+				ZSTR_VAL(canonical), ZSTR_VAL(mod));
 		}
 		return canonical;
 	}
@@ -10388,12 +10398,27 @@ ZEND_API void zend_declare_module_runtime(zend_string *name, HashTable *members)
  * (use-alias resolution of the module segment is a later increment.) */
 ZEND_API zend_ast *zend_ast_create_module_qualified_name(zend_ast *module_ast, zend_ast *member_ast) /* {{{ */
 {
+	/* The left operand of a "::" hop must be a name string: either a class name
+	 * (first hop, "Module::Member") or a previously-built module-qualified name
+	 * (subsequent hops, "Module::A::B"). Anything else — e.g. a runtime variable
+	 * in "new $x::Foo" — is not a valid class reference. */
+	if (module_ast->kind != ZEND_AST_ZVAL
+	 || Z_TYPE_P(zend_ast_get_zval(module_ast)) != IS_STRING) {
+		zend_error_noreturn(E_COMPILE_ERROR, "Illegal class name");
+	}
+
 	zend_string *m = zend_ast_get_str(module_ast);
 	zend_string *n = zend_ast_get_str(member_ast);
 	zend_string *combined = zend_string_concat3(ZSTR_VAL(m), ZSTR_LEN(m), "::", 2, ZSTR_VAL(n), ZSTR_LEN(n));
+	/* Preserve a "module::"-relative chain (ZEND_NAME_MODULE_SELF) across hops so
+	 * "module::Inner::Gadget" stays module-relative; any other left operand yields
+	 * a fully-qualified canonical name. This composes to arbitrary depth because the
+	 * result is itself an FQ/MODULE_SELF name node accepted as the next left operand. */
+	uint32_t attr = (module_ast->attr == ZEND_NAME_MODULE_SELF)
+		? ZEND_NAME_MODULE_SELF : ZEND_NAME_FQ;
 	zval zv;
 	ZVAL_STR(&zv, combined);
-	zend_ast *result = zend_ast_create_zval_ex(&zv, ZEND_NAME_FQ);
+	zend_ast *result = zend_ast_create_zval_ex(&zv, attr);
 	/* Release the now-unreferenced child name nodes' strings (arena frees the
 	 * node memory; we must release the zvals they hold). */
 	zend_ast_destroy(module_ast);

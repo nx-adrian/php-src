@@ -1536,12 +1536,16 @@ module_member:
 ;
 
 /* PHP Modules (experimental): a module-qualified class reference,
- * "Module::Member" (single "::" at the module boundary). */
+ * "Module::Member" and, recursively, "Module::Inner::Member" to arbitrary depth.
+ * The left-recursive hop composes because the AST helper appends one "::name"
+ * segment onto an already-built module-qualified name (FQ or "module::"-relative). */
 module_qualified_name:
 		name T_PAAMAYIM_NEKUDOTAYIM name
 			{ $$ = zend_ast_create_module_qualified_name($1, $3); }
 	|	T_MODULE T_PAAMAYIM_NEKUDOTAYIM name
 			{ $$ = zend_ast_create_module_self_qualified_name($3); }
+	|	module_qualified_name T_PAAMAYIM_NEKUDOTAYIM name
+			{ $$ = zend_ast_create_module_qualified_name($1, $3); }
 ;
 
 class_name_reference:
@@ -1701,6 +1705,13 @@ new_variable:
 			 * above, so the parser branches on the token after "::" (a bareword
 			 * name vs a $variable) within LALR(1) — no grammar conflict, and
 			 * "new/instanceof Foo::$staticProp" is preserved. */
+	|	new_variable T_PAAMAYIM_NEKUDOTAYIM name
+			{ $$ = zend_ast_create_module_qualified_name($1, $3); }
+			/* PHP Modules: subsequent "::name" hops for a deeper reference
+			 * "new/instanceof Outer::Inner::Gadget". The left operand is the
+			 * module-qualified name built by the rule above; the "name vs $var"
+			 * branch keeps it distinct from the static-property hop above. A
+			 * non-name left operand ("new $x::Foo") is rejected in the helper. */
 	|	T_MODULE T_PAAMAYIM_NEKUDOTAYIM name
 			{ $$ = zend_ast_create_module_self_qualified_name($3); }
 			/* PHP Modules: "module::Member" self-reference in new/instanceof. */

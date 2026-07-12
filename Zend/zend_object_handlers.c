@@ -1968,6 +1968,21 @@ ZEND_API ZEND_COLD zend_never_inline void zend_abstract_method_call(const zend_f
  * because it is the module's own backing class (ZEND_ACC_MODULE — its name IS the
  * module name) or because it is a member class keyed "Module::Name" (module = the
  * part before "::"). Both member classes and backing-class members route here. */
+/* The owning module of a member class named "A::B::…::Member" is everything up to
+ * the LAST "::" (here "A::B::…"). Using the last separator — not the first — makes a
+ * member of a nested module ("Outer::Inner::Secret") gate against its immediate module
+ * ("Outer::Inner") rather than the outermost segment ("Outer"). Returns the separator,
+ * or NULL if the name has none (not a module member). */
+static const char *zend_module_owner_last_sep(const char *val, size_t len)
+{
+	const char *last = NULL;
+	const char *end = val + len;
+	for (const char *p = val; (p = zend_memnstr(p, "::", 2, end)) != NULL; p += 2) {
+		last = p;
+	}
+	return last;
+}
+
 ZEND_API bool zend_module_scope_allows(
 		const zend_class_entry *member_ce, const zend_class_entry *scope)
 {
@@ -1978,7 +1993,7 @@ ZEND_API bool zend_module_scope_allows(
 		mlen = ZSTR_LEN(member_ce->name);
 	} else {
 		mval = ZSTR_VAL(member_ce->name);
-		const char *msep = zend_memnstr(mval, "::", 2, mval + ZSTR_LEN(member_ce->name));
+		const char *msep = zend_module_owner_last_sep(mval, ZSTR_LEN(member_ce->name));
 		if (!msep) {
 			return true; /* declaring class is not in a module — nothing to gate */
 		}
@@ -1994,7 +2009,7 @@ ZEND_API bool zend_module_scope_allows(
 		slen = ZSTR_LEN(scope->name);
 	} else {
 		sval = ZSTR_VAL(scope->name);
-		const char *ssep = zend_memnstr(sval, "::", 2, sval + ZSTR_LEN(scope->name));
+		const char *ssep = zend_module_owner_last_sep(sval, ZSTR_LEN(scope->name));
 		if (!ssep) {
 			return false;
 		}

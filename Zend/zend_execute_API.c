@@ -1292,46 +1292,63 @@ ZEND_API zend_class_entry *zend_lookup_class_ex(zend_string *name, zend_string *
 
 			/* Tier 1: ensure the module manifest is loaded. Presence is the module's
 			 * backing class (ZEND_ACC_MODULE) — a persisted class entry, so this works
-			 * for preloaded modules where the per-request registry would be empty. */
+			 * for preloaded modules where the per-request registry would be empty. If
+			 * the prefix already exists as a non-module class, it is NOT a module and
+			 * we do not autoload it as one. */
 			zend_class_entry *bce = zend_hash_find_ptr(EG(class_table), mod_lc);
-			if (!bce || !(bce->ce_flags & ZEND_ACC_MODULE)) {
+			if (!bce) {
 				zend_string *mod_name = zend_string_init(ZSTR_VAL(name), mod_len, 0);
 				zend_autoload(mod_name, mod_lc);
 				zend_string_release_ex(mod_name, 0);
+				bce = zend_hash_find_ptr(EG(class_table), mod_lc);
 				/* The member may now be inline-defined in the manifest. */
 				zv = zend_hash_find(EG(class_table), lc_name);
 			}
 
-			/* Tier 2: transform the boundary to "\" and autoload the sub-file. */
-			if (!zv) {
-				zend_string *bs_name = zend_string_dup(name, 0);
-				char *p = ZSTR_VAL(bs_name);
-				char *e = p + ZSTR_LEN(bs_name);
-				for (; p < e - 1; p++) {
-					if (p[0] == ':' && p[1] == ':') { *p = '\\'; memmove(p + 1, p + 2, e - (p + 2)); e--; break; }
+			/* Only run module-specific resolution when the prefix is genuinely a
+			 * module. Otherwise "A::C" is an ordinary (missing) class name — do NOT
+			 * apply the "::"->"\" sub-file transform; fall through so the name is
+			 * reported cleanly as "A::C" rather than a mangled sub-file variant. */
+			if (bce && (bce->ce_flags & ZEND_ACC_MODULE)) {
+				/* Tier 2: transform the boundary to "\" and autoload the sub-file.
+				 * Use zend_string_init (never zend_string_dup): the fetched name is
+				 * typically an interned literal, and zend_string_dup returns that same
+				 * interned buffer, so an in-place transform would corrupt the shared
+				 * "Module::Member" literal. We need a private mutable copy. */
+				if (!zv) {
+					zend_string *bs_name = zend_string_init(ZSTR_VAL(name), ZSTR_LEN(name), 0);
+					char *p = ZSTR_VAL(bs_name);
+					char *e = p + ZSTR_LEN(bs_name);
+					for (; p < e - 1; p++) {
+						if (p[0] == ':' && p[1] == ':') { *p = '\\'; memmove(p + 1, p + 2, e - (p + 2)); e--; break; }
+					}
+					bs_name = zend_string_truncate(bs_name, e - ZSTR_VAL(bs_name), 0);
+					zend_string *bs_lc = zend_string_tolower(bs_name);
+					zend_autoload(bs_name, bs_lc);
+					zend_string_release_ex(bs_name, 0);
+					zend_string_release_ex(bs_lc, 0);
+					/* The sub-file registered the class under its canonical "::" key. */
+					zv = zend_hash_find(EG(class_table), lc_name);
 				}
-				bs_name = zend_string_truncate(bs_name, e - ZSTR_VAL(bs_name), 0);
-				zend_string *bs_lc = zend_string_tolower(bs_name);
-				zend_autoload(bs_name, bs_lc);
-				zend_string_release_ex(bs_name, 0);
-				zend_string_release_ex(bs_lc, 0);
-				/* The sub-file registered the class under its canonical "::" key. */
-				zv = zend_hash_find(EG(class_table), lc_name);
+
+				zend_string_release_ex(mod_lc, 0);
+				zend_hash_del(&EG(autoload_current_classnames), lc_name);
+				if (!key) {
+					zend_string_release_ex(lc_name, 0);
+				}
+				if (zv) {
+					ce = (zend_class_entry *) Z_PTR_P(zv);
+					if (ce_cache) {
+						SET_CE_CACHE(ce_cache, ce);
+					}
+					return ce;
+				}
+				return NULL;
 			}
 
+			/* Not a module member: clean up and fall through to normal autoload,
+			 * which reports the canonical "Module::Member"-shaped name unchanged. */
 			zend_string_release_ex(mod_lc, 0);
-			zend_hash_del(&EG(autoload_current_classnames), lc_name);
-			if (!key) {
-				zend_string_release_ex(lc_name, 0);
-			}
-			if (zv) {
-				ce = (zend_class_entry *) Z_PTR_P(zv);
-				if (ce_cache) {
-					SET_CE_CACHE(ce_cache, ce);
-				}
-				return ce;
-			}
-			return NULL;
 		}
 	}
 
