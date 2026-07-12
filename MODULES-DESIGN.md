@@ -297,7 +297,33 @@ reaching an internal *static* method via the chained `A::B::C()` syntax (that
 chained form is itself deferred — see the spike), are not yet done. Static
 internal enforcement works when the class is reached dynamically.
 
-**Deferred to increment 6+:** forward-declaration ("claim") merging +
+### Increment 6 (2026-07-07) — ReflectionModule. DONE.
+
+Implemented and tested (14 module phpt; 509 reflection tests pass):
+
+- **`ReflectionModule`** in `ext/reflection`, introspecting a declared module
+  via the engine registry: `__construct(string $module)` (throws
+  `ReflectionException` for an unknown module), `getName(): string` + a
+  `public string $name` property, `getClasses(): array` (canonical member
+  names), `getSymbolVisibility(string): string` ("public"|"internal", throws
+  for a non-member). Verified end to end.
+- Registered with the classic `zend_register_internal_class` +
+  hand-written arginfo, deliberately NOT via the stub generator (`gen_stub`
+  needs network access, unavailable here). A real PR would use the stub/arginfo
+  workflow; noted.
+- **Naming-collision finding (design note):** the RFC proposes `isInternal()`
+  on `ReflectionClass`/`ReflectionMethod`, but those already inherit
+  `isInternal()` meaning "defined by a PHP extension/core" (vs userland). Reusing
+  the name would be a semantic collision. A real RFC must pick a distinct name
+  (e.g. `isModuleInternal()`); not added here to avoid overloading the existing
+  method. `getSymbolVisibility()` covers the introspection need for now.
+- **Cross-test impact (the recurring lesson):** adding a class to the
+  `reflection` extension changed `ReflectionExtension('reflection')->getClasses()`
+  from 26 to 27 entries — updated `ReflectionExtension_getClasses_basic.phpt`
+  accordingly. A feature that changes what's enumerable invalidates distant
+  tests' premises.
+
+**Deferred to increment 7+:** forward-declaration ("claim") merging +
 membership sub-files filling manifest claims; nested modules; `internal` on
 *class members* (methods/props) as distinct from module top-level members;
 module `static` functions/properties + `module::` self-reference; the

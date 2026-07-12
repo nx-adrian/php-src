@@ -8167,6 +8167,115 @@ ZEND_METHOD(ReflectionConstant, __toString)
 	RETURN_STR(smart_str_extract(&str));
 }
 
+/* {{{ PHP Modules (experimental): ReflectionModule
+ * A self-contained reflection class (independent of the shared reflection_object
+ * machinery) that introspects a declared module via the engine's module registry.
+ * Hand-registered with classic arginfo to avoid the stub generator, which needs
+ * network access unavailable in this environment. */
+static zend_class_entry *reflection_module_ptr;
+
+static zend_php_module *reflection_module_get(zval *this_ptr)
+{
+	zval *name = zend_read_property(reflection_module_ptr, Z_OBJ_P(this_ptr), "name", sizeof("name")-1, /* silent */ true, NULL);
+	if (Z_TYPE_P(name) != IS_STRING) {
+		return NULL;
+	}
+	zend_string *lc = zend_string_tolower(Z_STR_P(name));
+	zend_php_module *mod = zend_lookup_module(lc);
+	zend_string_release(lc);
+	return mod;
+}
+
+ZEND_METHOD(ReflectionModule, __construct)
+{
+	zend_string *module_name;
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STR(module_name)
+	ZEND_PARSE_PARAMETERS_END();
+
+	zend_string *lc = zend_string_tolower(module_name);
+	zend_php_module *mod = zend_lookup_module(lc);
+	zend_string_release(lc);
+
+	if (!mod) {
+		zend_throw_exception_ex(reflection_exception_ptr, 0,
+			"Module \"%s\" does not exist", ZSTR_VAL(module_name));
+		RETURN_THROWS();
+	}
+	/* Store the canonical (as-declared) name. */
+	zend_update_property_str(reflection_module_ptr, Z_OBJ_P(ZEND_THIS), "name", sizeof("name")-1, mod->name);
+}
+
+ZEND_METHOD(ReflectionModule, getName)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	zend_php_module *mod = reflection_module_get(ZEND_THIS);
+	if (!mod) { RETURN_FALSE; }
+	RETURN_STR_COPY(mod->name);
+}
+
+ZEND_METHOD(ReflectionModule, getClasses)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	zend_php_module *mod = reflection_module_get(ZEND_THIS);
+	array_init(return_value);
+	if (!mod) { return; }
+
+	/* The registry records member canonical names (lowercased). Return the
+	 * class-table's canonical-cased names where available, else the lc key. */
+	zend_string *member_lc;
+	ZEND_HASH_FOREACH_STR_KEY(&mod->members, member_lc) {
+		zval *ce_zv = zend_hash_find(EG(class_table), member_lc);
+		if (ce_zv) {
+			zend_class_entry *ce = Z_CE_P(ce_zv);
+			add_next_index_str(return_value, zend_string_copy(ce->name));
+		} else {
+			add_next_index_str(return_value, zend_string_copy(member_lc));
+		}
+	} ZEND_HASH_FOREACH_END();
+}
+
+ZEND_METHOD(ReflectionModule, getSymbolVisibility)
+{
+	zend_string *symbol;
+	ZEND_PARSE_PARAMETERS_START(1, 1)
+		Z_PARAM_STR(symbol)
+	ZEND_PARSE_PARAMETERS_END();
+
+	zend_php_module *mod = reflection_module_get(ZEND_THIS);
+	if (!mod) { RETURN_FALSE; }
+
+	zend_string *lc = zend_string_tolower(symbol);
+	void *vis = zend_hash_find_ptr(&mod->members, lc);
+	zend_string_release(lc);
+	if (!vis) {
+		zend_throw_exception_ex(reflection_exception_ptr, 0,
+			"Symbol \"%s\" is not a member of module \"%s\"", ZSTR_VAL(symbol), ZSTR_VAL(mod->name));
+		RETURN_THROWS();
+	}
+	RETURN_STRING((uintptr_t) vis == ZEND_MODULE_MEMBER_INTERNAL ? "internal" : "public");
+}
+
+ZEND_BEGIN_ARG_INFO_EX(arginfo_class_ReflectionModule___construct, 0, 0, 1)
+	ZEND_ARG_TYPE_INFO(0, module, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_ReflectionModule_getName, 0, 0, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_ReflectionModule_getClasses, 0, 0, IS_ARRAY, 0)
+ZEND_END_ARG_INFO()
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_ReflectionModule_getSymbolVisibility, 0, 1, IS_STRING, 0)
+	ZEND_ARG_TYPE_INFO(0, symbolName, IS_STRING, 0)
+ZEND_END_ARG_INFO()
+
+static const zend_function_entry reflection_module_functions[] = {
+	ZEND_ME(ReflectionModule, __construct, arginfo_class_ReflectionModule___construct, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionModule, getName, arginfo_class_ReflectionModule_getName, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionModule, getClasses, arginfo_class_ReflectionModule_getClasses, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionModule, getSymbolVisibility, arginfo_class_ReflectionModule_getSymbolVisibility, ZEND_ACC_PUBLIC)
+	ZEND_FE_END
+};
+/* }}} */
+
 PHP_MINIT_FUNCTION(reflection) /* {{{ */
 {
 	memcpy(&reflection_object_handlers, &std_object_handlers, sizeof(zend_object_handlers));
@@ -8177,6 +8286,19 @@ PHP_MINIT_FUNCTION(reflection) /* {{{ */
 	reflection_object_handlers.get_gc = reflection_get_gc;
 
 	reflection_exception_ptr = register_class_ReflectionException(zend_ce_exception);
+
+	/* PHP Modules (experimental): ReflectionModule. */
+	{
+		zend_class_entry ce;
+		INIT_CLASS_ENTRY(ce, "ReflectionModule", reflection_module_functions);
+		reflection_module_ptr = zend_register_internal_class(&ce);
+		zval default_name;
+		ZVAL_NULL(&default_name);
+		zend_declare_typed_property(reflection_module_ptr,
+			zend_string_init("name", sizeof("name")-1, 1), &default_name,
+			ZEND_ACC_PUBLIC, NULL,
+			(zend_type) ZEND_TYPE_INIT_MASK(MAY_BE_STRING));
+	}
 
 	reflection_ptr = register_class_Reflection();
 
