@@ -151,6 +151,10 @@ typedef struct _zend_php_module {
 
 ZEND_API zend_php_module *zend_register_module(zend_string *name);
 ZEND_API zend_php_module *zend_lookup_module(zend_string *lc_name);
+/* Runtime (re)registration of a module + its member roster from a compiled
+ * DECLARE_MODULE opline. Runs every request, including opcache cache hits where
+ * the compiler never ran, so the per-request registry is always rebuilt. */
+ZEND_API void zend_declare_module_runtime(zend_string *name, HashTable *members);
 ZEND_API zend_ast *zend_ast_create_module_qualified_name(zend_ast *module_ast, zend_ast *member_ast);
 
 typedef int (*user_opcode_handler_t) (zend_execute_data *execute_data);

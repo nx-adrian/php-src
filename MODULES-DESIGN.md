@@ -412,3 +412,46 @@ asymmetric-visibility interplay; ReflectionModule; `::`-name consumer audit
 (serialize `O:` strings, var_export); `use`-alias resolution of the module
 segment; module-level constants/functions visibility enforcement (only classes
 are gated so far).
+
+## Increment 10 — persistent (runtime-driven) module registry
+
+**Problem (highest-risk item, now reproduced, not just theorized).** Module
+registration happened *only* at compile time (`zend_compile_module` →
+`zend_register_module` into the per-request `EG(module_registry)`). Opcache
+compiles a file once and, on a cache hit, serves the cached op_array **without
+re-running the compiler** — so the module never registers on subsequent requests.
+Reproduced with the file cache across two processes: run 2 (mod.inc loaded from
+cache) fails `new ReflectionModule("Vendor\App")` with *"Module does not exist"*,
+and — worse — internal-access enforcement silently *inverts*: a dynamic
+`new "Vendor\App::Secret"()` from outside the module, correctly BLOCKED on run 1,
+is ALLOWED on the cached run 2 because the (empty) registry reports no such
+member. A compile-time-only guarantee is a security hole under opcache.
+
+**Fix — move registration to a runtime op, carry the roster as a CONST literal.**
+The engine already solves this for classes: `ZEND_DECLARE_CLASS` runs at execution
+time (even from cache) to populate `EG(class_table)`. Mirror that:
+- New opcode **`ZEND_DECLARE_MODULE`** (212), `CONST, CONST` — op1 = module name,
+  op2 = member roster array (`lc "module::member"` → `LONG` visibility). Handler
+  calls `zend_declare_module_runtime()`.
+- `zend_compile_module` builds the roster array while walking the manifest and
+  emits the op. Compile-time registration is *kept* (needed for same-file
+  compile-time hidden-member checks); the runtime op is idempotent — it only
+  (re)builds the roster when the registry entry is empty (i.e. a cache hit).
+- **Why no `zend_persist.c` changes are needed:** the roster rides in the
+  op_array's *constant table*, and opcache already persists/restores op_array
+  constants (arrays included) to SHM and file cache for free. Durability by
+  construction; the runtime op re-materialises the per-request registry from it.
+
+**Verification.** The two-process file-cache repro now passes on the cached run
+(module found; internal access blocked) — captured as
+`Zend/tests/modules/module_015_opcache_persistence.phpt`. All 17 module tests
+green; 476 core Zend tests (ns/class/const/trait/enum) green, 0 failures. The 7
+`ext/opcache/tests` failures are environmental (`proc_open`/`posix_spawn` can't
+launch the CLI-server helper in this sandbox), unrelated to modules.
+
+**Still open (preload).** Preloaded files aren't executed per request, so a
+preloaded module's `DECLARE_MODULE` op would not re-run — preload would need the
+module registered permanently at preload time (à la `preload_link()` for classes).
+Deferred; the common opcache (non-preload) path is now correct. The no-block
+membership form (`module Foo;`) emits an empty roster for now (its member-visibility
+recording is a separate, still-incomplete path).

@@ -10218,6 +10218,26 @@ ZEND_API zend_php_module *zend_register_module(zend_string *name) {
 	return mod;
 }
 
+/* Runtime counterpart of compile-time registration. Emitted as ZEND_DECLARE_MODULE
+ * so it executes on every request, INCLUDING opcache cache hits (where the compiler
+ * is skipped). The member roster is carried as a persisted CONST array literal
+ * (lc "module::member" -> LONG visibility), so opcache's ordinary constant
+ * persistence makes the roster durable with no changes to zend_persist.c. */
+ZEND_API void zend_declare_module_runtime(zend_string *name, HashTable *members) {
+	zend_php_module *mod = zend_register_module(name);
+
+	/* On an opcache MISS the compiler already populated the roster this request;
+	 * only (re)build it when empty (i.e. a cache hit, where the compiler did not
+	 * run). Idempotent for double-includes. */
+	if (zend_hash_num_elements(&mod->members) == 0 && members) {
+		zend_string *mkey;
+		zval *mval;
+		ZEND_HASH_FOREACH_STR_KEY_VAL(members, mkey, mval) {
+			zend_hash_add_ptr(&mod->members, mkey, (void*)(uintptr_t) Z_LVAL_P(mval));
+		} ZEND_HASH_FOREACH_END();
+	}
+}
+
 /* Build a canonical module-qualified name AST ("Module::Member") from two name
  * ASTs. Marked fully-qualified so class resolution looks it up verbatim (as the
  * canonical class-table key), bypassing namespace prefixing and use-imports.
@@ -10266,6 +10286,12 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 
 	FC(current_module) = zend_string_copy(name);
 
+	/* Roster of members, carried into the runtime ZEND_DECLARE_MODULE op as a CONST
+	 * array literal (lc "module::member" -> LONG visibility). Because it rides in the
+	 * op_array's constant table, opcache persists and restores it for free, so the
+	 * per-request registry can be rebuilt on a cache hit where the compiler is skipped. */
+	zend_array *roster = zend_new_array(stmt_ast ? 8 : 0);
+
 	if (stmt_ast) {
 		/* Manifest block: a list of ZEND_AST_MODULE_MEMBER wrappers, each carrying
 		 * the member's visibility in ->attr and the real declaration as child[0]. */
@@ -10286,6 +10312,9 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 						ZSTR_VAL(simple), ZSTR_LEN(simple));
 					zend_string *lc = zend_string_tolower(canonical);
 					zend_hash_update_ptr(&mod->members, lc, (void*)(uintptr_t) visibility);
+					zval vzv;
+					ZVAL_LONG(&vzv, (zend_long) visibility);
+					zend_hash_update(roster, lc, &vzv);
 					zend_string_release(canonical);
 					zend_string_release(lc);
 				}
@@ -10297,7 +10326,18 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 		FC(current_module) = NULL;
 	}
 	/* A membership declaration (no block, `module Foo;`) leaves current_module set
-	 * for the remainder of the file so subsequent declarations are module-owned. */
+	 * for the remainder of the file so subsequent declarations are module-owned; its
+	 * roster is populated by those later decls (not yet mirrored here), so the op below
+	 * carries an empty roster in that form. */
+
+	/* Emit the runtime registration op. Runs on every request (including opcache
+	 * cache hits), rebuilding EG(module_registry) from the persisted roster. */
+	znode name_node, roster_node;
+	name_node.op_type = IS_CONST;
+	ZVAL_STR_COPY(&name_node.u.constant, name);
+	roster_node.op_type = IS_CONST;
+	ZVAL_ARR(&roster_node.u.constant, roster);
+	zend_emit_op(NULL, ZEND_DECLARE_MODULE, &name_node, &roster_node);
 }
 /* }}} */
 
