@@ -99,6 +99,16 @@ ZEND_FUNCTION(clone)
 		RETURN_THROWS();
 	}
 
+	/* PHP Modules: an "internal" __clone() gates cloning to same-module callers,
+	 * mirroring how a private __clone() prevents cloning from outside. */
+	if (clone && (clone->common.fn_flags & ZEND_ACC_MODULE_INTERNAL)
+			&& !zend_module_scope_allows(clone->common.scope, scope)) {
+		zend_throw_error(NULL,
+			"Cannot call internal method %s::__clone() from outside its module",
+			ZSTR_VAL(clone->common.scope->name));
+		RETURN_THROWS();
+	}
+
 	zend_object *cloned;
 	if (zend_hash_num_elements(with) > 0) {
 		if (UNEXPECTED(!zobj->handlers->clone_obj_with)) {

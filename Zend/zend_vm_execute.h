@@ -5323,6 +5323,19 @@ static ZEND_VM_COLD ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_
 		}
 	}
 
+	/* PHP Modules: an "internal" __clone() gates cloning to same-module callers,
+	 * mirroring how a private __clone() prevents cloning from outside. */
+	if (clone && (clone->common.fn_flags & ZEND_ACC_MODULE_INTERNAL)
+			&& !zend_module_scope_allows(clone->common.scope, EX(func)->op_array.scope)) {
+		zend_throw_error(NULL,
+			"Cannot call internal method %s::__clone() from outside its module",
+			ZSTR_VAL(clone->common.scope->name));
+
+
+		ZVAL_UNDEF(EX_VAR(opline->result.var));
+		HANDLE_EXCEPTION();
+	}
+
 	ZVAL_OBJ(EX_VAR(opline->result.var), clone_call(zobj));
 
 
@@ -11436,6 +11449,15 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_NEW_SPEC_CONS
 		}
 	} else {
 		ce = Z_CE_P(EX_VAR(opline->op1.var));
+		/* PHP Modules: object-based "new $obj" takes the CE straight from the object,
+		 * bypassing the name-based fetch gate. Re-apply it so an internal class cannot be
+		 * re-instantiated from outside its module via an escaped instance. */
+		if (UNEXPECTED(zend_module_runtime_access_denied(ce))) {
+			zend_throw_error(NULL,
+				"Cannot instantiate internal module member \"%s\" from outside its module", ZSTR_VAL(ce->name));
+			ZVAL_UNDEF(EX_VAR(opline->result.var));
+			HANDLE_EXCEPTION();
+		}
 	}
 
 	result = EX_VAR(opline->result.var);
@@ -17486,6 +17508,18 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_CLONE_SPEC_TM
 			ZVAL_UNDEF(EX_VAR(opline->result.var));
 			HANDLE_EXCEPTION();
 		}
+	}
+
+	/* PHP Modules: an "internal" __clone() gates cloning to same-module callers,
+	 * mirroring how a private __clone() prevents cloning from outside. */
+	if (clone && (clone->common.fn_flags & ZEND_ACC_MODULE_INTERNAL)
+			&& !zend_module_scope_allows(clone->common.scope, EX(func)->op_array.scope)) {
+		zend_throw_error(NULL,
+			"Cannot call internal method %s::__clone() from outside its module",
+			ZSTR_VAL(clone->common.scope->name));
+		zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+		ZVAL_UNDEF(EX_VAR(opline->result.var));
+		HANDLE_EXCEPTION();
 	}
 
 	ZVAL_OBJ(EX_VAR(opline->result.var), clone_call(zobj));
@@ -30139,6 +30173,15 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_NEW_SPEC_VAR_
 		}
 	} else {
 		ce = Z_CE_P(EX_VAR(opline->op1.var));
+		/* PHP Modules: object-based "new $obj" takes the CE straight from the object,
+		 * bypassing the name-based fetch gate. Re-apply it so an internal class cannot be
+		 * re-instantiated from outside its module via an escaped instance. */
+		if (UNEXPECTED(zend_module_runtime_access_denied(ce))) {
+			zend_throw_error(NULL,
+				"Cannot instantiate internal module member \"%s\" from outside its module", ZSTR_VAL(ce->name));
+			ZVAL_UNDEF(EX_VAR(opline->result.var));
+			HANDLE_EXCEPTION();
+		}
 	}
 
 	result = EX_VAR(opline->result.var);
@@ -32886,6 +32929,19 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_CLONE_SPEC_UN
 			ZVAL_UNDEF(EX_VAR(opline->result.var));
 			HANDLE_EXCEPTION();
 		}
+	}
+
+	/* PHP Modules: an "internal" __clone() gates cloning to same-module callers,
+	 * mirroring how a private __clone() prevents cloning from outside. */
+	if (clone && (clone->common.fn_flags & ZEND_ACC_MODULE_INTERNAL)
+			&& !zend_module_scope_allows(clone->common.scope, EX(func)->op_array.scope)) {
+		zend_throw_error(NULL,
+			"Cannot call internal method %s::__clone() from outside its module",
+			ZSTR_VAL(clone->common.scope->name));
+
+
+		ZVAL_UNDEF(EX_VAR(opline->result.var));
+		HANDLE_EXCEPTION();
 	}
 
 	ZVAL_OBJ(EX_VAR(opline->result.var), clone_call(zobj));
@@ -37208,6 +37264,15 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_NEW_SPEC_UNUS
 		}
 	} else {
 		ce = Z_CE_P(EX_VAR(opline->op1.var));
+		/* PHP Modules: object-based "new $obj" takes the CE straight from the object,
+		 * bypassing the name-based fetch gate. Re-apply it so an internal class cannot be
+		 * re-instantiated from outside its module via an escaped instance. */
+		if (UNEXPECTED(zend_module_runtime_access_denied(ce))) {
+			zend_throw_error(NULL,
+				"Cannot instantiate internal module member \"%s\" from outside its module", ZSTR_VAL(ce->name));
+			ZVAL_UNDEF(EX_VAR(opline->result.var));
+			HANDLE_EXCEPTION();
+		}
 	}
 
 	result = EX_VAR(opline->result.var);
@@ -40210,6 +40275,19 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_FUNC_CCONV ZEND_CLONE_SPEC_CV
 			ZVAL_UNDEF(EX_VAR(opline->result.var));
 			HANDLE_EXCEPTION();
 		}
+	}
+
+	/* PHP Modules: an "internal" __clone() gates cloning to same-module callers,
+	 * mirroring how a private __clone() prevents cloning from outside. */
+	if (clone && (clone->common.fn_flags & ZEND_ACC_MODULE_INTERNAL)
+			&& !zend_module_scope_allows(clone->common.scope, EX(func)->op_array.scope)) {
+		zend_throw_error(NULL,
+			"Cannot call internal method %s::__clone() from outside its module",
+			ZSTR_VAL(clone->common.scope->name));
+
+
+		ZVAL_UNDEF(EX_VAR(opline->result.var));
+		HANDLE_EXCEPTION();
 	}
 
 	ZVAL_OBJ(EX_VAR(opline->result.var), clone_call(zobj));
@@ -58095,6 +58173,19 @@ static ZEND_VM_COLD ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_CLONE
 		}
 	}
 
+	/* PHP Modules: an "internal" __clone() gates cloning to same-module callers,
+	 * mirroring how a private __clone() prevents cloning from outside. */
+	if (clone && (clone->common.fn_flags & ZEND_ACC_MODULE_INTERNAL)
+			&& !zend_module_scope_allows(clone->common.scope, EX(func)->op_array.scope)) {
+		zend_throw_error(NULL,
+			"Cannot call internal method %s::__clone() from outside its module",
+			ZSTR_VAL(clone->common.scope->name));
+
+
+		ZVAL_UNDEF(EX_VAR(opline->result.var));
+		HANDLE_EXCEPTION();
+	}
+
 	ZVAL_OBJ(EX_VAR(opline->result.var), clone_call(zobj));
 
 
@@ -64106,6 +64197,15 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_NEW_SPEC_CONST_UNU
 		}
 	} else {
 		ce = Z_CE_P(EX_VAR(opline->op1.var));
+		/* PHP Modules: object-based "new $obj" takes the CE straight from the object,
+		 * bypassing the name-based fetch gate. Re-apply it so an internal class cannot be
+		 * re-instantiated from outside its module via an escaped instance. */
+		if (UNEXPECTED(zend_module_runtime_access_denied(ce))) {
+			zend_throw_error(NULL,
+				"Cannot instantiate internal module member \"%s\" from outside its module", ZSTR_VAL(ce->name));
+			ZVAL_UNDEF(EX_VAR(opline->result.var));
+			HANDLE_EXCEPTION();
+		}
 	}
 
 	result = EX_VAR(opline->result.var);
@@ -70156,6 +70256,18 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_CLONE_SPEC_TMP_TAI
 			ZVAL_UNDEF(EX_VAR(opline->result.var));
 			HANDLE_EXCEPTION();
 		}
+	}
+
+	/* PHP Modules: an "internal" __clone() gates cloning to same-module callers,
+	 * mirroring how a private __clone() prevents cloning from outside. */
+	if (clone && (clone->common.fn_flags & ZEND_ACC_MODULE_INTERNAL)
+			&& !zend_module_scope_allows(clone->common.scope, EX(func)->op_array.scope)) {
+		zend_throw_error(NULL,
+			"Cannot call internal method %s::__clone() from outside its module",
+			ZSTR_VAL(clone->common.scope->name));
+		zval_ptr_dtor_nogc(EX_VAR(opline->op1.var));
+		ZVAL_UNDEF(EX_VAR(opline->result.var));
+		HANDLE_EXCEPTION();
 	}
 
 	ZVAL_OBJ(EX_VAR(opline->result.var), clone_call(zobj));
@@ -82709,6 +82821,15 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_NEW_SPEC_VAR_UNUSE
 		}
 	} else {
 		ce = Z_CE_P(EX_VAR(opline->op1.var));
+		/* PHP Modules: object-based "new $obj" takes the CE straight from the object,
+		 * bypassing the name-based fetch gate. Re-apply it so an internal class cannot be
+		 * re-instantiated from outside its module via an escaped instance. */
+		if (UNEXPECTED(zend_module_runtime_access_denied(ce))) {
+			zend_throw_error(NULL,
+				"Cannot instantiate internal module member \"%s\" from outside its module", ZSTR_VAL(ce->name));
+			ZVAL_UNDEF(EX_VAR(opline->result.var));
+			HANDLE_EXCEPTION();
+		}
 	}
 
 	result = EX_VAR(opline->result.var);
@@ -85456,6 +85577,19 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_CLONE_SPEC_UNUSED_
 			ZVAL_UNDEF(EX_VAR(opline->result.var));
 			HANDLE_EXCEPTION();
 		}
+	}
+
+	/* PHP Modules: an "internal" __clone() gates cloning to same-module callers,
+	 * mirroring how a private __clone() prevents cloning from outside. */
+	if (clone && (clone->common.fn_flags & ZEND_ACC_MODULE_INTERNAL)
+			&& !zend_module_scope_allows(clone->common.scope, EX(func)->op_array.scope)) {
+		zend_throw_error(NULL,
+			"Cannot call internal method %s::__clone() from outside its module",
+			ZSTR_VAL(clone->common.scope->name));
+
+
+		ZVAL_UNDEF(EX_VAR(opline->result.var));
+		HANDLE_EXCEPTION();
 	}
 
 	ZVAL_OBJ(EX_VAR(opline->result.var), clone_call(zobj));
@@ -89778,6 +89912,15 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_NEW_SPEC_UNUSED_UN
 		}
 	} else {
 		ce = Z_CE_P(EX_VAR(opline->op1.var));
+		/* PHP Modules: object-based "new $obj" takes the CE straight from the object,
+		 * bypassing the name-based fetch gate. Re-apply it so an internal class cannot be
+		 * re-instantiated from outside its module via an escaped instance. */
+		if (UNEXPECTED(zend_module_runtime_access_denied(ce))) {
+			zend_throw_error(NULL,
+				"Cannot instantiate internal module member \"%s\" from outside its module", ZSTR_VAL(ce->name));
+			ZVAL_UNDEF(EX_VAR(opline->result.var));
+			HANDLE_EXCEPTION();
+		}
 	}
 
 	result = EX_VAR(opline->result.var);
@@ -92780,6 +92923,19 @@ static ZEND_OPCODE_HANDLER_RET ZEND_OPCODE_HANDLER_CCONV ZEND_CLONE_SPEC_CV_TAIL
 			ZVAL_UNDEF(EX_VAR(opline->result.var));
 			HANDLE_EXCEPTION();
 		}
+	}
+
+	/* PHP Modules: an "internal" __clone() gates cloning to same-module callers,
+	 * mirroring how a private __clone() prevents cloning from outside. */
+	if (clone && (clone->common.fn_flags & ZEND_ACC_MODULE_INTERNAL)
+			&& !zend_module_scope_allows(clone->common.scope, EX(func)->op_array.scope)) {
+		zend_throw_error(NULL,
+			"Cannot call internal method %s::__clone() from outside its module",
+			ZSTR_VAL(clone->common.scope->name));
+
+
+		ZVAL_UNDEF(EX_VAR(opline->result.var));
+		HANDLE_EXCEPTION();
 	}
 
 	ZVAL_OBJ(EX_VAR(opline->result.var), clone_call(zobj));

@@ -1417,3 +1417,37 @@ concealment while breaking defensive checks — and it would diverge from how `p
 RFC clarified: `internal` gates *use/access*, not the type identity of an escaped object.
 
 225 try/catch/exception + module tests green.
+
+## Escaped internal objects — close the re-instantiation and clone gaps
+
+Follow-up to the `instanceof`/escape discussion: an `internal`-typed object can escape via a
+public API (allowed, like returning a `private`-typed value), but two object operations
+bypassed the boundary. Escape itself is not prevented — sound escape analysis across returns,
+args, exceptions, property reads, arrays, and closures is impractical in a dynamic language —
+so instead the *held object* is made safe.
+
+1. **`new $escaped` leaked.** Name-based `new` gates in `zend_fetch_class(_with_scope)`, but the
+   object path in `ZEND_NEW` (`ce = Z_CE_P(op1.var)`) took the CE straight off the object with no
+   check, so `new $escaped` / `new (get_class($escaped))`… re-instantiated an internal class from
+   outside. Note `Z_OBJCE_P` in `ZEND_FETCH_CLASS` cannot be gated wholesale — it also serves
+   `$obj::PUB_CONST`/`$obj::pubStatic()`, which must stay allowed. So the gate went in `ZEND_NEW`'s
+   IS_VAR branch only. Exposed `zend_module_runtime_access_denied` as `ZEND_API` (was static) and
+   reused it; message "Cannot instantiate internal module member …". Cheap: flag/`::`-scan early-out
+   for non-internal classes, so normal `new $obj` is unaffected. Regenerated the VM.
+
+2. **`internal __clone` was ignored.** `clone` enforces `private`/`protected __clone` in the
+   `ZEND_CLONE` opcode and the `clone()` builtin, but the guard keyed on
+   `!(fn_flags & ZEND_ACC_PUBLIC)` — and `internal __clone` is *still* `ZEND_ACC_PUBLIC`
+   (internal is a separate flag layered on top). Added a parallel check: if `__clone` carries
+   `ZEND_ACC_MODULE_INTERNAL` and `!zend_module_scope_allows(scope)`, throw "Cannot call internal
+   method …::__clone() from outside its module". Mirrored into both the opcode and the builtin
+   (kept in sync per the in-file contract). Cloning of a class with no `__clone` is unchanged
+   (follows PHP: clone is governed by `__clone` visibility, not the internal-class flag).
+
+Reflection deliberately left as a bypass hatch (`newInstanceWithoutConstructor` already bypasses
+`private` ctors). Net model: an escaped internal object exposes its public surface but cannot be
+named, constructed, cloned (when guarded), or have its internal members reached from outside.
+Construction control = `internal __construct`; clone control = `internal __clone`; both reuse
+existing PHP visibility mechanisms. Tests module_044 (clone) + module_045 (new). 47 module tests
+green; clone/type_declarations/reflection suites green (opcache cli-server failures are
+environment: `posix_spawn` unavailable in sandbox). RFC: added "Escaped internal objects".
