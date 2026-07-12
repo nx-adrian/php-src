@@ -1393,3 +1393,27 @@ Undecided/Future question, not a current guarantee).
 **Verified:** module_042 (public extends/implements/trait ok; internal extends & implements
 denied incl. early binding; extends-internal-from-inside ok). 44 module + 546 trait/class/iface
 + 714 inheritance/enum regressions green.
+
+---
+
+## Second re-audit: catch grammar + instanceof/get_class clarification
+
+A deeper pass over interactions (instanceof, catch, type declarations, interface-extends,
+internal traits, property hooks, first-class callables, constant expressions). Most work:
+`instanceof` (public), param/return/property type hints incl. internal-in-dead-code (no error),
+`interface J extends \Mod::I`, internal-trait use denied, property hooks + internal,
+`Mod::fn(...)` first-class callable, module const as default arg / in const-expr — all fine.
+
+**Fixed — `catch (\Mod::Exc $e)` did not parse.** The catch clause uses `catch_name_list`
+(built on `class_name`), which — like the earlier `implements` gap — never accepted `::`.
+Added `module_qualified_name` to `catch_name_list` (single and `|`-union forms); conflict-free.
+Now single, chained, and union catch of module exception types works. Test module_043.
+
+**Not a bug — `instanceof \Mod::Internal` from outside returns true (not gated).** An internal
+class named in `instanceof` is not denied the way `new`/`extends`/`implements` are. Deliberately
+left as-is: an internal-typed object that escapes via a public API already reveals its type
+through `get_class()` (verified: returns "M::A"), so gating `instanceof` would add no
+concealment while breaking defensive checks — and it would diverge from how `private` behaves.
+RFC clarified: `internal` gates *use/access*, not the type identity of an escaped object.
+
+225 try/catch/exception + module tests green.
