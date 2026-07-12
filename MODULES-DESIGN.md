@@ -704,3 +704,41 @@ gate, already in place); constants additionally need the three-route gate
 
 Tests module_024 (public static props), module_025 (internal rejected). 25 module +
 732 core (class/static/grammar/ns/trait/const/enum/property) tests green.
+
+## `internal` flag design — decisions & constraints (for the props/consts increment)
+
+**Chosen approach: a permanent, context-specific low bit** for `internal` on
+properties and constants (vs. a transient marker translated to bit 31). The ACC
+flag space is already context-dependent (e.g. bit 28 is ENUM for a class but
+OVERRIDE for a function), so this is idiomatic. A low bit (<=15) is required
+because the flag must survive the parse-time carrier `zend_ast->attr`, which is
+`uint16_t`; only bits 13/14/15 are free in *both* the property and constant flag
+contexts. Methods keep a full-width function flag (they ride `zend_ast_decl->flags`,
+32-bit — no attr limit). Rationale over the marker: no translation step to miss
+(the marker fails *open* if a translation site is skipped), permanent flag visible
+in the final `property_info`/const flags, same near-zero runtime cost.
+
+**Bug found & fixed while choosing the bit:** `ZEND_ACC_MODULE_INTERNAL` (methods)
+was `1u<<31`, aliasing `ZEND_ACC_STRICT_TYPES`; every method in a strict_types file
+read as internal. Moved to function bit 30 (the last free one). This is why the
+method flag is bit 30 and the prop/const flag is a *separate* low-bit constant.
+
+**Semantics locked (confirmed with author):**
+- `internal` is scoped to the module **definition**, not the module *instance* — it
+  is a code-location predicate ("reachable only from code inside this module"),
+  independent of whether the member is static or per-instance. This is what lets the
+  same flag+gate serve instance members unchanged when modules become instantiable.
+- `internal` keeps its exact meaning across the static→instance shift; the `module::`
+  accessor resolves both static and instance members (they share the class symbol
+  table), so no new concept is needed there.
+
+**Constraints to keep the door open for instantiable modules (future scope):**
+- Treat `ZEND_ACC_MODULE` as an **identity** flag only ("this class *is* a module").
+  Its current uninstantiability is a *phase policy* (membership in
+  `ZEND_ACC_UNINSTANTIABLE`), to be simply dropped when modules become instantiable
+  — like "static class" is an observation, not a separate kind. Do NOT bake
+  "module ⇒ uninstantiable" into the flag's meaning or into enforcement code.
+- Keep module-*mechanism* flags in the **class** bit-space (roomy `ce_flags` /
+  `ce_flags2`), reserving the scarce low prop/const `attr` bits for genuine
+  per-member visibility. The RFC's `export` reads as a class↔module relationship, so
+  it should be a class flag and not compete for those bits.
