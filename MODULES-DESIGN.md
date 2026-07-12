@@ -933,3 +933,38 @@ not a functional blocker.
 
 Recommend (1) or (3) as a focused increment with conflict-counterexample iteration —
 not a tail-end addition. Everything else on the branch remains green (`%expect 0`).
+
+## Chained "::" (C6) — implemented via compiler reinterpretation (approach 2)
+
+`Module::Class::member` now works: static method, class constant, and static property
+(read + write). No grammar change — `A::B::C` already parses as a class-constant fetch
+`(A::B)` used as the class expression of the outer access, so `%expect 0` is untouched.
+
+**Mechanism:** `zend_try_module_chain_class`, called at the top of
+`zend_compile_class_ref` (the single choke point for the class operand of static calls,
+class-const fetches, and static-prop fetches). If the class operand is a bareword
+`CLASS_CONST(A, B)` and the resolved leading segment `A` is a module (its backing class
+`ZEND_ACC_MODULE` is visible, or the module is registered this compilation), it returns
+the canonical member-class name `"A::B"`, which the caller uses as a fully-qualified
+class reference. Otherwise it returns NULL and stock semantics are preserved.
+
+**Verified:** `Vendor\App::Service::make()/::TAG/::$count` (read+write); internal
+enforcement holds through the chain (internal member class denied at class fetch;
+internal method/const of a public member class denied at dispatch); works under
+**preload**; and stock `Cfg::CLS::method()` (a real constant's value used as a dynamic
+class) is untouched. Ownership: the helper returns an owned string transferred to the
+result znode — no stray AST node, leak-free (confirmed on the debug build). Tests
+module_030 (happy path), module_031 (internal via chain). 33 module + 479 const/class/
+static/ns/trait/enum tests green.
+
+**Known limitations (follow-ups):**
+- `Module::Class::class` (the `::class` magic on a chain) is not reinterpreted — it
+  parses to `ZEND_AST_CLASS_NAME`, a different path than `zend_compile_class_ref`.
+- *Cross-file:* reinterpretation needs the module known at compile time of the
+  referencing file (same file, preloaded, or registered this request). A chain to a
+  member class whose module is only autoloaded later falls back to stock (fails);
+  workaround: ensure the module is loaded/preloaded, or `use` the member class.
+- *Depth:* only a 2-segment class part (`A::B`) is reinterpreted. Deeper chains
+  (`A::B::C::D`) need iterating the nested `CLASS_CONST` — this is the natural hook for
+  **nested modules (C7)**, which also require nested-module *declaration* (still
+  rejected today). C6 provides the resolution groundwork; C7 declaration is separate.
