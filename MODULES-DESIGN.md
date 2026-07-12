@@ -987,3 +987,16 @@ avoid erroring on dead code; the eager compile-time catch is left to static anal
 as it is for private/protected. `zend_module_member_is_hidden` deleted (now unused).
 `module_006` updated to assert the runtime behavior (dead-code no-error + reached-error).
 33 module + 384 class/ns/const/autoload tests green.
+
+## Constructor visibility — internal `__construct`
+
+A public class may have an `internal` constructor: visible/typeable everywhere,
+instantiable only from inside the module. `zend_std_get_constructor` only checked
+non-public constructors, so an internal (public+marker) constructor slipped through
+and `new` succeeded from outside. Added a module-scope gate there: if the constructor
+carries `ZEND_ACC_MODULE_INTERNAL` and the caller is outside the module, throw
+"Cannot instantiate class M::X via internal constructor from outside its module".
+Class-fetch gating already denies internal *classes* before the constructor is even
+consulted, so the (class visibility × constructor visibility) matrix resolves as: an
+internal class denies first; a public class with an internal constructor denies at
+construction. Test module_032. 34 module + 814 object/class/reflection tests green.
