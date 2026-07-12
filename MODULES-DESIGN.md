@@ -20,13 +20,19 @@ genuine typo (`module::Nope`) is still an E_COMPILE_ERROR (module_018 unchanged)
 Test module_046. Bare module-relative names already resolved lazily and were
 unaffected.
 
-Known remaining edge: a forward reference *through a later-declared nested inline
-module* (`module::Inner::Widget` where `Inner` is declared after the referrer)
-still doesn't resolve — the pre-pass registers direct members but not a nested
-module's own members, which only exist after the nested module compiles. A
-general fix would need recursive pre-registration of the nested module subtree.
-Deferred; declaring the nested module before its referrers (or using a bare
-relative name) works today.
+Generalized to arbitrary nesting depth: the flat direct-member pre-pass was
+replaced by a single recursive walk, `zend_preregister_module_subtree(name,
+stmt_ast)`, that descends into nested inline modules (ZEND_AST_MODULE with a body)
+and registers every member of the whole subtree into the right module's
+`mod->members` before any body compiles. `zend_register_module` is idempotent, so
+creating a nested module's registry entry early is free and its later real
+compilation reuses it. The walk runs once, guarded to the outermost module
+(`parent_module == NULL`) — an inline nested module compiled during the parent's
+body pass was already covered by the parent's walk. Result: `module::A::B::C…`
+forward references resolve at any depth (test module_046 covers 1–3 levels plus an
+inner-block forward ref), while a genuine typo at any depth stays an
+E_COMPILE_ERROR. Only mod->members is populated by the walk; rosters and backing
+classes are still built by the real compilation pass.
 
 Working notes for the vertical-slice implementation of the Modules RFC draft
 (author: __adrian). This file tracks decisions, deviations from the draft, and
