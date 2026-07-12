@@ -455,3 +455,38 @@ module registered permanently at preload time (à la `preload_link()` for classe
 Deferred; the common opcache (non-preload) path is now correct. The no-block
 membership form (`module Foo;`) emits an empty roster for now (its member-visibility
 recording is a separate, still-incomplete path).
+
+## Increment 11 — "module::" self-reference (class-like members)
+
+Adds the `module::Member` self-reference the RFC uses (`new module::Ledger()`,
+`public function make(): module::Ledger`, `extends module::Ledger`,
+`$o instanceof module::Ledger`). `module::` names a member of the *lexically
+enclosing* module — which is unknown at parse time — so resolution is deferred:
+
+- **Grammar.** `T_MODULE '::' name` added as an alternative in `module_qualified_name`
+  (covers `extends` and type positions) and in `new_variable` (covers `new` and
+  `instanceof`). Conflict-free — `%expect 0` still holds — because `module` is a
+  distinct token from any `class_name`, so the added rules share no ambiguous
+  prefix. Emits `zend_ast_create_module_self_qualified_name()`, a name zval tagged
+  with a new qualification attr **`ZEND_NAME_MODULE_SELF (3)`**.
+- **Resolution.** `zend_resolve_class_name` handles `ZEND_NAME_MODULE_SELF` first:
+  errors if used outside a module; otherwise prefixes the member with
+  `FC(current_module)` and **requires it to be a declared member** of that module
+  (checked against the module's roster). This is the first place membership gates
+  resolution rather than merely name-prefixing — the explicit `module::X` form
+  asserts "X because the module declares it," matching the intended semantics.
+  Using attr value 3 is safe: the const-expr `new` path resolves the name (line
+  ~12021) before it re-encodes `attr` as `fetch_type << SHIFT` (line ~12031).
+
+Tests: `module_016` (happy path across new/type/extends/instanceof, incl. reaching
+an `internal` member from inside), `module_017` (outside-module error), `module_018`
+(non-member error). 20 module tests green; 511 grammar/class/new/instanceof/ns/
+trait/enum/const tests green, 0 regressions.
+
+**Known gap (pre-existing, not specific to `module::`).** `implements` and
+interface-`extends` lists use `name_list`, which accepts neither `module::Member`
+nor the two-segment `Module::Member`. Wiring `module_qualified_name` into those
+lists is a separate `::`-coverage task (touches the shared `name_list`, used also
+by `catch` and trait `use`), deferred to avoid conflict risk. **Not yet done:**
+`module::` static functions/properties (`module::foo()`, `module::$x`) — the
+module-level statics storage/resolution model (C8) is the next increment.

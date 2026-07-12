@@ -156,6 +156,9 @@ ZEND_API zend_php_module *zend_lookup_module(zend_string *lc_name);
  * the compiler never ran, so the per-request registry is always rebuilt. */
 ZEND_API void zend_declare_module_runtime(zend_string *name, HashTable *members);
 ZEND_API zend_ast *zend_ast_create_module_qualified_name(zend_ast *module_ast, zend_ast *member_ast);
+/* "module::Member": a class-like reference to a member of the current module,
+ * resolved at compile time against FC(current_module). */
+ZEND_API zend_ast *zend_ast_create_module_self_qualified_name(zend_ast *member_ast);
 
 typedef int (*user_opcode_handler_t) (zend_execute_data *execute_data);
 
@@ -1090,6 +1093,10 @@ ZEND_API zend_string *zend_type_to_string(zend_type type);
 #define ZEND_NAME_FQ       0
 #define ZEND_NAME_NOT_FQ   1
 #define ZEND_NAME_RELATIVE 2
+/* PHP Modules (experimental): "module::Member" self-reference. Resolved against
+ * FC(current_module) in zend_resolve_class_name, which runs before the const-expr
+ * "new" path re-encodes attr (fetch_type << SHIFT), so value 3 does not clash. */
+#define ZEND_NAME_MODULE_SELF 3
 
 /* ZEND_FETCH_ flags in class name AST of new const expression must not clash with ZEND_NAME_ flags */
 #define ZEND_CONST_EXPR_NEW_FETCH_TYPE_SHIFT 2

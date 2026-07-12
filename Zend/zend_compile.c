@@ -1203,6 +1203,34 @@ static zend_string *zend_resolve_class_name(zend_string *name, uint32_t type) /*
 {
 	const char *compound;
 
+	/* PHP Modules: "module::Member" self-reference. The module segment is the
+	 * lexically enclosing module; resolve it here and require Member to be a
+	 * declared member of that module (the explicit self-reference form asserts
+	 * membership by construction). */
+	if (type == ZEND_NAME_MODULE_SELF) {
+		if (!FC(current_module)) {
+			zend_error_noreturn(E_COMPILE_ERROR,
+				"\"module::\" cannot be used outside a module");
+		}
+		zend_string *mod = FC(current_module);
+		zend_string *canonical = zend_string_concat3(
+			ZSTR_VAL(mod), ZSTR_LEN(mod), "::", 2, ZSTR_VAL(name), ZSTR_LEN(name));
+		zend_string *lc_canonical = zend_string_tolower(canonical);
+		zend_string *lc_mod = zend_string_tolower(mod);
+		zend_php_module *m = zend_lookup_module(lc_mod);
+		bool is_member = m && zend_hash_exists(&m->members, lc_canonical);
+		zend_string_release(lc_mod);
+		zend_string_release(lc_canonical);
+		if (!is_member) {
+			zend_string *dup = zend_string_copy(canonical);
+			zend_string_release(canonical);
+			zend_error_noreturn(E_COMPILE_ERROR,
+				"\"%s\" is not a member of module \"%s\"",
+				ZSTR_VAL(dup), ZSTR_VAL(mod));
+		}
+		return canonical;
+	}
+
 	if (ZEND_FETCH_CLASS_DEFAULT != zend_get_class_fetch_type(name)) {
 		if (type == ZEND_NAME_FQ) {
 			zend_error_noreturn(E_COMPILE_ERROR,
@@ -10253,6 +10281,22 @@ ZEND_API zend_ast *zend_ast_create_module_qualified_name(zend_ast *module_ast, z
 	/* Release the now-unreferenced child name nodes' strings (arena frees the
 	 * node memory; we must release the zvals they hold). */
 	zend_ast_destroy(module_ast);
+	zend_ast_destroy(member_ast);
+	return result;
+}
+/* }}} */
+
+/* Build a deferred "module::Member" self-reference name. Unlike the two-segment
+ * form above, the module segment is implicit (the lexically enclosing module),
+ * which is unknown until compile time, so the member name is tagged
+ * ZEND_NAME_MODULE_SELF and prefixed with FC(current_module) in
+ * zend_resolve_class_name. */
+ZEND_API zend_ast *zend_ast_create_module_self_qualified_name(zend_ast *member_ast) /* {{{ */
+{
+	zend_string *member = zend_ast_get_str(member_ast);
+	zval zv;
+	ZVAL_STR(&zv, zend_string_copy(member));
+	zend_ast *result = zend_ast_create_zval_ex(&zv, ZEND_NAME_MODULE_SELF);
 	zend_ast_destroy(member_ast);
 	return result;
 }
