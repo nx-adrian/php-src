@@ -161,6 +161,9 @@ ZEND_API void zend_declare_module_runtime(zend_string *name, HashTable *members)
 /* True if class scope `scope` may access an internal member declared in `member_ce`
  * (same-module check). Used for internal methods and internal backing-class members. */
 ZEND_API bool zend_module_scope_allows(const zend_class_entry *member_ce, const zend_class_entry *scope);
+/* True if `scope` may see the internal nested module whose backing class is `module_ce`
+ * — i.e. scope is inside that module's own subtree, or is a direct member of its parent. */
+ZEND_API bool zend_module_scope_can_see_module(const zend_class_entry *module_ce, const zend_class_entry *scope);
 ZEND_API zend_ast *zend_ast_create_module_qualified_name(zend_ast *module_ast, zend_ast *member_ast);
 /* "module::Member": a class-like reference to a member of the current module,
  * resolved at compile time against FC(current_module). */

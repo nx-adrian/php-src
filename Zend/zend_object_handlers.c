@@ -1986,16 +1986,18 @@ static const char *zend_module_owner_last_sep(const char *val, size_t len)
 ZEND_API bool zend_module_scope_allows(
 		const zend_class_entry *member_ce, const zend_class_entry *scope)
 {
-	const char *mval;
+	const char *mval = ZSTR_VAL(member_ce->name);
 	size_t mlen;
 	if (member_ce->ce_flags & ZEND_ACC_MODULE) {
-		mval = ZSTR_VAL(member_ce->name);
+		/* A module backing class: the owning module is its own full name (used to gate
+		 * the module's own internal static members against the module's own code). */
 		mlen = ZSTR_LEN(member_ce->name);
 	} else {
-		mval = ZSTR_VAL(member_ce->name);
+		/* A member class: the owning module is everything before the last "::" (for a
+		 * nested member "Outer::Inner::X" that is its immediate module "Outer::Inner"). */
 		const char *msep = zend_module_owner_last_sep(mval, ZSTR_LEN(member_ce->name));
 		if (!msep) {
-			return true; /* declaring class is not in a module — nothing to gate */
+			return true; /* not in a module — nothing to gate */
 		}
 		mlen = (size_t)(msep - mval);
 	}
@@ -2015,10 +2017,62 @@ ZEND_API bool zend_module_scope_allows(
 		}
 		slen = (size_t)(ssep - sval);
 	}
+	/* Strict: a member's own `internal` visibility requires the accessor to be in that
+	 * exact module. Scope membership is NOT transitive — code in "Outer::Inner" is in
+	 * module "Outer::Inner", not "Outer". (The separate "can a scope see an internal
+	 * nested *module*" question — where a parent's members legitimately see it — is
+	 * handled by zend_module_scope_can_see_module in the runtime access gate.) */
 	if (slen != mlen) {
 		return false;
 	}
 	return zend_binary_strncasecmp(sval, mlen, mval, mlen, mlen) == 0;
+}
+
+/* PHP Modules: can code executing in `scope` see the internal nested module whose
+ * backing class is `module_ce` (canonical name "P::M", internal to parent "P")? Two
+ * ways, and only these: the scope is inside M's own subtree (M itself or a member/
+ * sub-module nested under it — it is your own module), or the scope is a direct
+ * member of the parent P (P sees its internal member M). Merely being nested under P
+ * elsewhere does not count — scope membership is not transitive. */
+ZEND_API bool zend_module_scope_can_see_module(
+		const zend_class_entry *module_ce, const zend_class_entry *scope)
+{
+	if (!scope) {
+		return false;
+	}
+	const char *fm = ZSTR_VAL(module_ce->name);
+	size_t fm_len = ZSTR_LEN(module_ce->name);
+
+	/* Scope's own module path (a backing class is its own module; a member class is
+	 * everything before its last "::"). */
+	const char *sval = ZSTR_VAL(scope->name);
+	size_t slen;
+	if (scope->ce_flags & ZEND_ACC_MODULE) {
+		slen = ZSTR_LEN(scope->name);
+	} else {
+		const char *ssep = zend_module_owner_last_sep(sval, ZSTR_LEN(scope->name));
+		if (!ssep) {
+			return false;
+		}
+		slen = (size_t)(ssep - sval);
+	}
+
+	/* Inside M's subtree: scope module == M, or nested under M ("M::" prefix). */
+	if (slen >= fm_len
+	 && zend_binary_strncasecmp(sval, fm_len, fm, fm_len, fm_len) == 0
+	 && (slen == fm_len || (sval[fm_len] == ':' && sval[fm_len + 1] == ':'))) {
+		return true;
+	}
+
+	/* Direct member of the parent P (M's name before its last "::"). */
+	const char *psep = zend_module_owner_last_sep(fm, fm_len);
+	if (psep) {
+		size_t plen = (size_t)(psep - fm);
+		if (slen == plen && zend_binary_strncasecmp(sval, plen, fm, plen, plen) == 0) {
+			return true;
+		}
+	}
+	return false;
 }
 
 static ZEND_COLD void zend_bad_module_method_call(const zend_function *fbc)

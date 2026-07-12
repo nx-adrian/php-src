@@ -1092,3 +1092,57 @@ green; 661 namespace/type/class regression tests green.
 Remaining Feature-2/3 gaps unchanged: `use Module::Member` and `internal module` enforcement.
 Nested cross-file module autoload (tier-1/tier-2 still key off the first `::`) is deferred to
 the membership/loading work (Feature 4).
+
+---
+
+## Increment: `internal module` enforcement (Feature 3)
+
+**Goal:** an `internal` nested module is a member of its enclosing module with internal
+visibility — usable anywhere inside the parent (including sibling members and deeper
+sub-modules), but hidden from outside the parent, including all of its *public* members.
+
+**Declaration (`zend_compile.c`):** `zend_compile_module` captures the transient
+`FC(current_member_internal)` signal at entry (the parent set it before dispatching the
+nested-module decl), clears it so it does not leak into the nested module's own member
+compilation, and re-applies it only when compiling the nested module's **backing class** —
+so an internal nested module's backing class is stamped `ZEND_ACC2_MODULE_INTERNAL`. The
+class-decl stamp condition no longer excludes `ZEND_ACC_MODULE`, since the signal is now set
+precisely (a top-level module's backing class is compiled with it cleared).
+
+**Two distinct predicates (scope membership is NOT transitive).** A member's own `internal`
+visibility and an internal *module*'s visibility are different questions and must not be
+conflated (an early attempt used a single "containment" rule and was wrong — code in
+`Outer::Inner` is in module `Outer::Inner`, not `Outer`, so it must not thereby see `Outer`'s
+other internals):
+
+- `zend_module_scope_allows(member_ce, scope)` (`zend_object_handlers.c`) — **strict**: the
+  accessor's module must equal the member's own module exactly (backing class → full name for
+  the module's own internal statics; member class → name before the last `::`). Reverted to
+  strict equality.
+- `zend_module_scope_can_see_module(module_ce, scope)` (new, `zend_object_handlers.c`) — true
+  iff `scope` is inside the module's own subtree (its module == `M`, or nested under `M::`) OR
+  is a **direct** member of `M`'s parent `P` (scope module == `P`). Merely living deeper under
+  `P` does not count.
+
+**Runtime gate (`zend_execute_API.c`, `zend_module_runtime_access_denied`):** two cases.
+(1) `ce` is itself internal: if it is the backing class of an internal nested module, gate with
+`can_see_module`; if it is an internal member class, gate with the strict `scope_allows`.
+(2) `ce` lives under an internal nested module — walk the `::` ancestor prefixes and, for any
+ancestor that is an internal module, require `can_see_module`. The walk only runs for names
+with 2+ `::` (a single-`::` member's only ancestor is a top-level module, which never carries
+visibility), so non-nested access pays nothing. This is what hides even the *public* members
+(`Outer::Inner::Gadget`, `Outer::Inner::IV`, `Outer::Inner::make()`) of an internal module,
+while still letting `Outer`'s direct members and Inner's own subtree in.
+
+**Verified:** from a *direct* member of `Outer` (module code, a sibling member class) the
+internal module Inner and its public members are usable; Inner's own code reaches Inner's own
+internal members; but Inner reaching UP into `Outer`'s *other* internal members is denied
+(non-transitivity — the reachUp probe). From outside `Outer`, const / static-function /
+member-class / static-on-member / internal-member access are all denied; public nested modules
+remain open; ReflectionModule bypasses; the `ce_flags2` marker survives an opcache file-cache
+hit. Tests module_035 (+opcache module_036). 38 module tests green; 611 trait/class/ns +
+earlier class/type regressions green.
+
+**Remaining Feature-2/4 gaps unchanged.** Nested cross-file autoload still keys tier-1/tier-2
+off the first `::` (deferred to Feature 4); an ancestor module not yet loaded is not gated
+(same cross-file caveat).

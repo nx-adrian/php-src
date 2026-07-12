@@ -1896,22 +1896,67 @@ zend_class_entry *zend_fetch_class_with_scope(
  * the "<module>::" prefix of the executing function's class scope name. This
  * closes the cases the compile-time static check cannot see: members resolved
  * via autoload, and dynamic ("new $name") references. */
-static bool zend_module_runtime_access_denied(const zend_class_entry *ce)
+static zend_class_entry *zend_module_current_user_scope(void)
 {
-	/* CE-resident internal-ness: the member class carries ZEND_ACC2_MODULE_INTERNAL,
-	 * which persists on the class entry (opcache/preload) rather than in the
-	 * per-request module registry. No registry lookup needed. */
-	if (EXPECTED(!(ce->ce_flags2 & ZEND_ACC2_MODULE_INTERNAL))) {
-		return false;
-	}
-	/* Internal member: allowed only from code inside the same module. Derive the
-	 * caller scope from the nearest user frame. */
 	zend_execute_data *ex = EG(current_execute_data);
 	while (ex && (!ex->func || !ZEND_USER_CODE(ex->func->common.type))) {
 		ex = ex->prev_execute_data;
 	}
-	zend_class_entry *scope = (ex && ex->func) ? ex->func->common.scope : NULL;
-	return !zend_module_scope_allows(ce, scope);
+	return (ex && ex->func) ? ex->func->common.scope : NULL;
+}
+
+static bool zend_module_runtime_access_denied(const zend_class_entry *ce)
+{
+	bool have_scope = false;
+	zend_class_entry *scope = NULL;
+
+	/* Case 1: ce is itself an internal member. CE-resident internal-ness
+	 * (ZEND_ACC2_MODULE_INTERNAL) persists on the class entry (opcache/preload), so no
+	 * per-request registry lookup is needed. Two sub-cases with different rules:
+	 *  - an internal *member class*: the accessor must be in that member's own module
+	 *    (strict same-module check);
+	 *  - the backing class of an internal *nested module*: the accessor must be able to
+	 *    "see" the module — inside its own subtree, or a direct member of its parent. */
+	if (UNEXPECTED(ce->ce_flags2 & ZEND_ACC2_MODULE_INTERNAL)) {
+		scope = zend_module_current_user_scope();
+		have_scope = true;
+		bool ok = (ce->ce_flags & ZEND_ACC_MODULE)
+			? zend_module_scope_can_see_module(ce, scope)
+			: zend_module_scope_allows(ce, scope);
+		if (!ok) {
+			return true;
+		}
+	}
+
+	/* Case 2: ce lives under an internal nested module. Even a public member of an
+	 * internal module is hidden outside that module's parent, so walk the "::" ancestor
+	 * prefixes and gate against any that is an internal module. Only names with two or
+	 * more "::" can have such an ancestor — a single-"::" member's only ancestor is a
+	 * top-level module, which never carries visibility — so the common path is free. */
+	const char *val = ZSTR_VAL(ce->name);
+	const char *end = val + ZSTR_LEN(ce->name);
+	const char *first = zend_memnstr(val, "::", 2, end);
+	if (UNEXPECTED(first && zend_memnstr(first + 2, "::", 2, end))) {
+		for (const char *p = first; p; p = zend_memnstr(p + 2, "::", 2, end)) {
+			size_t plen = (size_t)(p - val);
+			zend_string *lc = zend_string_alloc(plen, 0);
+			zend_str_tolower_copy(ZSTR_VAL(lc), val, plen);
+			zend_class_entry *anc = zend_hash_find_ptr(EG(class_table), lc);
+			zend_string_release(lc);
+			if (anc && (anc->ce_flags & ZEND_ACC_MODULE)
+			 && (anc->ce_flags2 & ZEND_ACC2_MODULE_INTERNAL)) {
+				if (!have_scope) {
+					scope = zend_module_current_user_scope();
+					have_scope = true;
+				}
+				/* The accessor must be able to see this internal nested module. */
+				if (!zend_module_scope_can_see_module(anc, scope)) {
+					return true;
+				}
+			}
+		}
+	}
+	return false;
 }
 
 zend_class_entry *zend_fetch_class_by_name(zend_string *class_name, zend_string *key, uint32_t fetch_type) /* {{{ */
