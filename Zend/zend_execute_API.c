@@ -1279,6 +1279,59 @@ ZEND_API zend_class_entry *zend_lookup_class_ex(zend_string *name, zend_string *
 		return NULL;
 	}
 
+	/* PHP Modules: two-tier autoload for a module-qualified name "Module::Member".
+	 * Tier 1 loads the module manifest (the member may be defined inline there);
+	 * Tier 2 transforms "::"->"\" and autoloads the membership sub-file, which
+	 * registers the class under its canonical "::" key. */
+	{
+		const char *sep = zend_memnstr(ZSTR_VAL(lc_name), "::", 2,
+			ZSTR_VAL(lc_name) + ZSTR_LEN(lc_name));
+		if (sep) {
+			size_t mod_len = sep - ZSTR_VAL(lc_name);
+			zend_string *mod_lc = zend_string_init(ZSTR_VAL(lc_name), mod_len, 0);
+
+			/* Tier 1: ensure the module manifest is loaded. */
+			if (!zend_lookup_module(mod_lc)) {
+				zend_string *mod_name = zend_string_init(ZSTR_VAL(name), mod_len, 0);
+				zend_autoload(mod_name, mod_lc);
+				zend_string_release_ex(mod_name, 0);
+				/* The member may now be inline-defined in the manifest. */
+				zv = zend_hash_find(EG(class_table), lc_name);
+			}
+
+			/* Tier 2: transform the boundary to "\" and autoload the sub-file. */
+			if (!zv) {
+				zend_string *bs_name = zend_string_dup(name, 0);
+				char *p = ZSTR_VAL(bs_name);
+				char *e = p + ZSTR_LEN(bs_name);
+				for (; p < e - 1; p++) {
+					if (p[0] == ':' && p[1] == ':') { *p = '\\'; memmove(p + 1, p + 2, e - (p + 2)); e--; break; }
+				}
+				bs_name = zend_string_truncate(bs_name, e - ZSTR_VAL(bs_name), 0);
+				zend_string *bs_lc = zend_string_tolower(bs_name);
+				zend_autoload(bs_name, bs_lc);
+				zend_string_release_ex(bs_name, 0);
+				zend_string_release_ex(bs_lc, 0);
+				/* The sub-file registered the class under its canonical "::" key. */
+				zv = zend_hash_find(EG(class_table), lc_name);
+			}
+
+			zend_string_release_ex(mod_lc, 0);
+			zend_hash_del(&EG(autoload_current_classnames), lc_name);
+			if (!key) {
+				zend_string_release_ex(lc_name, 0);
+			}
+			if (zv) {
+				ce = (zend_class_entry *) Z_PTR_P(zv);
+				if (ce_cache) {
+					SET_CE_CACHE(ce_cache, ce);
+				}
+				return ce;
+			}
+			return NULL;
+		}
+	}
+
 	if (ZSTR_VAL(name)[0] == '\\') {
 		autoload_name = zend_string_init(ZSTR_VAL(name) + 1, ZSTR_LEN(name) - 1, 0);
 	} else {
