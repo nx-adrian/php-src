@@ -1212,6 +1212,12 @@ static zend_string *zend_resolve_class_name(zend_string *name, uint32_t type) /*
 			zend_error_noreturn(E_COMPILE_ERROR,
 				"\"module::\" cannot be used outside a module");
 		}
+		/* Bare "module" (empty member) is a reference to the module's backing class,
+		 * whose name is the plain module name — used by module::CONST / module::f() /
+		 * module::$x. No membership check: the backing class is the module itself. */
+		if (ZSTR_LEN(name) == 0) {
+			return zend_string_copy(FC(current_module));
+		}
 		zend_string *mod = FC(current_module);
 		zend_string *canonical = zend_string_concat3(
 			ZSTR_VAL(mod), ZSTR_LEN(mod), "::", 2, ZSTR_VAL(name), ZSTR_LEN(name));
@@ -10302,6 +10308,17 @@ ZEND_API zend_ast *zend_ast_create_module_self_qualified_name(zend_ast *member_a
 }
 /* }}} */
 
+/* Bare "module" as a class reference (the module's backing class). Represented as
+ * an EMPTY-member ZEND_NAME_MODULE_SELF name, which zend_resolve_class_name maps to
+ * the plain current-module name (the backing class). */
+ZEND_API zend_ast *zend_ast_create_module_backing_name(void) /* {{{ */
+{
+	zval zv;
+	ZVAL_EMPTY_STRING(&zv);
+	return zend_ast_create_zval_ex(&zv, ZEND_NAME_MODULE_SELF);
+}
+/* }}} */
+
 static void zend_compile_module(const zend_ast *ast) /* {{{ */
 {
 	zend_ast *name_ast = ast->child[0];
@@ -10336,6 +10353,12 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 	 * per-request registry can be rebuilt on a cache hit where the compiler is skipped. */
 	zend_array *roster = zend_new_array(stmt_ast ? 8 : 0);
 
+	/* Module-level static members (constants for now; static functions/properties
+	 * in later increments) are gathered into a synthetic non-instantiable "backing
+	 * class" named plainly after the module, so M::C / M::f() / M::$x reuse the
+	 * engine's class-constant / static-method / static-property machinery. */
+	zend_ast *backing_stmts = zend_ast_create_list(0, ZEND_AST_STMT_LIST);
+
 	if (stmt_ast) {
 		/* Manifest block: a list of ZEND_AST_MODULE_MEMBER wrappers, each carrying
 		 * the member's visibility in ->attr and the real declaration as child[0]. */
@@ -10345,6 +10368,20 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 			ZEND_ASSERT(member->kind == ZEND_AST_MODULE_MEMBER);
 			uint32_t visibility = member->attr;
 			zend_ast *decl = member->child[0];
+
+			/* Module-level constants become class constants of the backing class,
+			 * not global constants. Collect them as class-const groups; they are
+			 * compiled below as part of the backing class, not here. */
+			if (decl->kind == ZEND_AST_CONST_DECL) {
+				/* TODO(module statics): map internal -> ZEND_ACC_MODULE_INTERNAL and
+				 * enforce it on the class-constant fetch path. For now all module
+				 * constants are accessible (public); internal-const enforcement is a
+				 * follow-up. */
+				zend_ast *group = zend_ast_create(ZEND_AST_CLASS_CONST_GROUP, decl, NULL, NULL);
+				group->attr = ZEND_ACC_PUBLIC;
+				backing_stmts = zend_ast_list_add(backing_stmts, group);
+				continue;
+			}
 
 			/* Record the member's canonical name -> visibility before compiling, so
 			 * self-referential internal access within the manifest resolves. */
@@ -10368,6 +10405,20 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 		}
 		zend_string_release(FC(current_module));
 		FC(current_module) = NULL;
+	}
+
+	/* Emit the backing class once the module's own members are compiled and
+	 * current_module is cleared, so its name is the plain module name ("M"), not
+	 * module-prefixed ("M::M"). Marked abstract to make it non-instantiable
+	 * (new M() is rejected); a module-specific flag/message is a later refinement. */
+	if (zend_ast_get_list(backing_stmts)->children > 0) {
+		ZEND_ASSERT(FC(current_module) == NULL);
+		zend_string *backing_name = zend_string_copy(name);
+		zend_ast *backing = zend_ast_create_decl(ZEND_AST_CLASS,
+			ZEND_ACC_EXPLICIT_ABSTRACT_CLASS, ast->lineno, NULL,
+			backing_name, NULL, NULL, backing_stmts, NULL, NULL);
+		zend_compile_top_stmt(backing);
+		zend_string_release(backing_name);
 	}
 	/* A membership declaration (no block, `module Foo;`) leaves current_module set
 	 * for the remainder of the file so subsequent declarations are module-owned; its

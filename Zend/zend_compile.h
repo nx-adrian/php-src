@@ -159,6 +159,9 @@ ZEND_API zend_ast *zend_ast_create_module_qualified_name(zend_ast *module_ast, z
 /* "module::Member": a class-like reference to a member of the current module,
  * resolved at compile time against FC(current_module). */
 ZEND_API zend_ast *zend_ast_create_module_self_qualified_name(zend_ast *member_ast);
+/* Bare "module" as a class reference (the module's backing class), used by the
+ * static-member self-reference forms module::CONST / module::f() / module::$x. */
+ZEND_API zend_ast *zend_ast_create_module_backing_name(void);
 
 typedef int (*user_opcode_handler_t) (zend_execute_data *execute_data);
 

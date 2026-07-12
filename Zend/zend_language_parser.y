@@ -1582,6 +1582,9 @@ constant:
 class_constant:
 		class_name T_PAAMAYIM_NEKUDOTAYIM identifier
 			{ $$ = zend_ast_create_class_const_or_name($1, $3); }
+	|	T_MODULE T_PAAMAYIM_NEKUDOTAYIM identifier
+			{ $$ = zend_ast_create_class_const_or_name(zend_ast_create_module_backing_name(), $3); }
+			/* PHP Modules: "module::CONST" self-reference to a backing-class constant. */
 	|	variable_class_name T_PAAMAYIM_NEKUDOTAYIM identifier
 			{ $$ = zend_ast_create_class_const_or_name($1, $3); }
 	|	class_name T_PAAMAYIM_NEKUDOTAYIM '{' expr '}'
