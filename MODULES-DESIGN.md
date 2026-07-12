@@ -297,6 +297,49 @@ reaching an internal *static* method via the chained `A::B::C()` syntax (that
 chained form is itself deferred — see the spike), are not yet done. Static
 internal enforcement works when the class is reached dynamically.
 
+### Increment 7 (2026-07-07) — conflict-free `::` (supersedes the %expect 1 tradeoff). DONE.
+
+The increment-2 grammar accepted one shift/reduce conflict (`%expect 1`) by
+routing module-qualified names through a standalone `module_qualified_name:
+name '::' name` rule fed into `class_name_reference`. That competed with the
+stock `class_name '::' simple_variable` rule (static-property-as-class-ref) at
+the `::`: reaching the static-prop rule requires reducing `name → class_name`
+*before* the `::`, while the module rule shifts `::` keeping `name` — a
+reduce/shift fork at a point where the disambiguating token (bareword vs
+`$variable`) is not yet visible to the LALR(1) parser. Default-shift resolved it
+but turned `new Foo::$staticProp` and `instanceof Foo::$staticProp` (both valid
+stock PHP) into parse errors.
+
+**This is now fixed with ZERO conflicts and ZERO BC loss.** The module case is
+declared as a *sibling* of the static-property rule inside `new_variable`:
+
+```
+new_variable:
+    ...
+  | class_name T_PAAMAYIM_NEKUDOTAYIM simple_variable   { STATIC_PROP }   /* Foo::$x */
+  | class_name T_PAAMAYIM_NEKUDOTAYIM name              { module-qualified } /* Foo::Bar */
+```
+
+Both alternatives share the `class_name ::` prefix, so the parser reduces
+`name → class_name` unconditionally (both continuations need it), shifts the
+`::`, and only *then* branches on the following token — a bareword `name` vs a
+`$variable` — which is squarely within one-token lookahead. `module_qualified_name`
+is retained only for the pure type/declaration positions (type hints, `extends`),
+which were always conflict-free. `%expect` is back to **0**.
+
+Verified end to end: `new Vendor\User::Profile()`, `extends`, `instanceof`, type
+hints all work AND `new Holder::$cls` / `(new Foo) instanceof Holder::$cls`
+(static-property class references) work again. 14→15 module phpt (added
+`module_013_static_prop_coexist`); no regression across lang/classes/namespaces.
+
+**Lesson for the RFC:** the `::` grammar conflict is NOT inherent to reusing the
+operator — it was an artifact of *where* the new rule was attached. Sharing the
+`class_name ::` prefix with the existing static-property rule eliminates it. The
+recommendations doc's "accept the break / use a new token" framing is superseded:
+`::` is viable with no conflict and no lost syntax. A dedicated token is not
+needed on grammar grounds. (Chained `A::B::C` in expression position is a
+separate, still-deferred item and is unaffected by this.)
+
 ### Increment 6 (2026-07-07) — ReflectionModule. DONE.
 
 Implemented and tested (14 module phpt; 509 reflection tests pass):
