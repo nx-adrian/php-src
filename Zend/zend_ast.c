@@ -2817,6 +2817,18 @@ simple_list:
 				smart_str_appendc(str, ';');
 			}
 			break;
+		case ZEND_AST_MODULE:
+			smart_str_appends(str, "module ");
+			zend_ast_export_name(str, ast->child[0], 0, indent);
+			if (ast->child[1]) {
+				smart_str_appends(str, " {\n");
+				zend_ast_export_stmt(str, ast->child[1], indent + 1);
+				zend_ast_export_indent(str, indent);
+				smart_str_appends(str, "}\n");
+			} else {
+				smart_str_appendc(str, ';');
+			}
+			break;
 		case ZEND_AST_USE_ELEM:
 		case ZEND_AST_TRAIT_ALIAS:
 			zend_ast_export_name(str, ast->child[0], 0, indent);

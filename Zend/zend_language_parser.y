@@ -134,6 +134,8 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %token <ident> T_CASE          "'case'"
 %token <ident> T_DEFAULT       "'default'"
 %token <ident> T_MATCH         "'match'"
+%token <ident> T_MODULE        "'module'"
+%token <ident> T_INTERNAL      "'internal'"
 %token <ident> T_BREAK         "'break'"
 %token <ident> T_CONTINUE      "'continue'"
 %token <ident> T_GOTO          "'goto'"
@@ -311,7 +313,7 @@ reserved_non_modifiers:
 	| T_FUNCTION | T_CONST | T_RETURN | T_PRINT | T_YIELD | T_LIST | T_SWITCH | T_ENDSWITCH | T_CASE | T_DEFAULT | T_BREAK
 	| T_ARRAY | T_CALLABLE | T_EXTENDS | T_IMPLEMENTS | T_NAMESPACE | T_TRAIT | T_INTERFACE | T_CLASS
 	| T_CLASS_C | T_TRAIT_C | T_FUNC_C | T_METHOD_C | T_LINE | T_FILE | T_DIR | T_NS_C | T_FN | T_MATCH | T_ENUM
-	| T_PROPERTY_C
+	| T_PROPERTY_C | T_MODULE | T_INTERNAL
 ;
 
 semi_reserved:
@@ -416,6 +418,12 @@ top_statement:
 	|	T_NAMESPACE { RESET_DOC_COMMENT(); }
 		'{' top_statement_list '}'
 			{ $$ = zend_ast_create(ZEND_AST_NAMESPACE, NULL, $4); }
+	|	T_MODULE namespace_declaration_name ';'
+			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, NULL);
+			  RESET_DOC_COMMENT(); }
+	|	T_MODULE namespace_declaration_name { RESET_DOC_COMMENT(); }
+		'{' top_statement_list '}'
+			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, $5); }
 	|	T_USE mixed_group_use_declaration ';'		{ $$ = $2; }
 	|	T_USE use_type group_use_declaration ';'	{ $$ = $3; $$->attr = $2; }
 	|	T_USE use_declarations ';'					{ $$ = $2; $$->attr = ZEND_SYMBOL_CLASS; }

@@ -114,6 +114,11 @@ typedef struct _zend_file_context {
 	bool in_namespace;
 	bool has_bracketed_namespaces;
 
+	/* PHP Modules (experimental): name of the enclosing module manifest/membership
+	 * scope for the current file, or NULL. Module-owned symbols are prefixed with
+	 * "<module>::" (the module boundary), then namespace-prefixed with "\" as usual. */
+	zend_string *current_module;
+
 	HashTable *imports;
 	HashTable *imports_function;
 	HashTable *imports_const;
@@ -131,6 +136,21 @@ typedef union _zend_parser_stack_elem {
 
 void zend_compile_top_stmt(zend_ast *ast);
 void zend_const_expr_to_zval(zval *result, zend_ast **ast_ptr, bool allow_dynamic);
+
+/* PHP Modules (experimental) */
+typedef struct _zend_php_module {
+	zend_string *name;      /* canonical (as-declared) module name, e.g. "Vendor\User" */
+	zend_string *lc_name;   /* lowercased key */
+	/* member visibility map (canonical-lc symbol name -> visibility flag) is added
+	 * in a later increment; increment 1 only records module existence + ownership. */
+	HashTable members;      /* lc member FQN -> (void*)(uintptr_t) visibility */
+} zend_php_module;
+
+#define ZEND_MODULE_MEMBER_PUBLIC   1
+#define ZEND_MODULE_MEMBER_INTERNAL 2
+
+ZEND_API zend_php_module *zend_register_module(zend_string *name);
+ZEND_API zend_php_module *zend_lookup_module(zend_string *lc_name);
 
 typedef int (*user_opcode_handler_t) (zend_execute_data *execute_data);
 

@@ -143,6 +143,7 @@ void init_executor(void) /* {{{ */
 
 	EG(function_table) = CG(function_table);
 	EG(class_table) = CG(class_table);
+	EG(module_registry) = NULL; /* PHP Modules (experimental): lazily allocated */
 
 	EG(error_handling) = EH_NORMAL;
 	EG(flags) = EG_FLAGS_INITIAL;
@@ -448,6 +449,13 @@ void shutdown_executor(void) /* {{{ */
 	zend_try {
 		zend_stream_shutdown();
 	} zend_end_try();
+
+	/* PHP Modules (experimental): tear down the per-request module registry. */
+	if (EG(module_registry)) {
+		zend_hash_destroy(EG(module_registry));
+		pefree(EG(module_registry), 0);
+		EG(module_registry) = NULL;
+	}
 
 	zend_shutdown_executor_values(fast_shutdown);
 

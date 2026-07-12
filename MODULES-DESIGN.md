@@ -42,6 +42,16 @@ integration, JIT awareness.
 - **Canonical FQN display**: `Vendor\User::Auth\PasswordChecker` (single `::`
   at the module boundary, `\` inside). Class-table keys use the same string,
   lowercased. `::class` yields the canonical form.
+  - *Implication (author-confirmed choice):* `::` in the class-table key is
+    harmless (the table is a case-insensitive string hash), but it makes module
+    member resolution a SEPARATE code path from namespace (`\`) resolution —
+    which is the point (the visible boundary is the feature). Obligation: every
+    site that consumes a class-name string must be taught `::`. Audit list for
+    later phases: `serialize`/`unserialize` `O:` strings, `var_export`,
+    `ReflectionClass::getName`, exception/error message formatting, `::class`.
+    Backslash keys would reuse all that for free but make module members
+    indistinguishable from plain namespaced classes (needs a side-registry) and
+    strip `::` from `::class`/errors — rejected for that reason.
 - **Tier-2 autoload verification** [OPEN — author undecided 2026-07-07]:
   after the transformed (`::`→`\`) autoload, the engine verifies the loaded
   definition actually declared membership in the module; a plain class at that
@@ -123,3 +133,45 @@ type hints, catch, `new`) — and all of those are conflict-free. The lone
 No dedicated token needed. Deferred within the slice: chained `A::B::C`
 resolution (needs engine-side reinterpretation, Phase 2) and `instanceof`
 default-shift wiring (add with an explicit test pinning the behavior).
+
+### Increment 1 (2026-07-07) — parse + register + canonical key. DONE.
+
+Implemented and tested (`Zend/tests/modules/`, 6 phpt, all pass; no
+regression in namespaces/lang):
+
+- Tokens `T_MODULE`/`T_INTERNAL` (scanner, `RETURN_TOKEN_WITH_IDENT`);
+  semi-reserved via `reserved_non_modifiers` (usable as method/const names —
+  verified). BC break is the `match`/`enum` class (global funcs/classes named
+  `module`/`internal`).
+- `ZEND_AST_MODULE` (2-child: name, body-or-NULL) + grammar for the manifest
+  block (`module X { ... }`) and membership declaration (`module X;`), added to
+  `top_statement`. Zero new bison conflicts (only the spike's known items,
+  none wired yet). AST export case added.
+- Module boundary prefixing: `FC(current_module)` threads the enclosing module
+  through `zend_prefix_with_ns`, which now yields `<module>::<ns-prefixed name>`
+  — so `module Vendor\User { class Profile }` → class-table key
+  `vendor\user::profile`, and a membership file `module Vendor\User; namespace
+  Auth; class PasswordChecker` → `vendor\user::auth\passwordchecker`. `::class`
+  and `get_class()` return the canonical `::` form. The namespace-first check
+  (`zend_is_first_statement`) now permits a leading `module X;`, like `declare`.
+- Per-request registry `EG(module_registry)` (lazy alloc, freed at
+  `shutdown_executor`); `zend_register_module`/`zend_lookup_module` +
+  `zend_php_module` struct (name, lc_name, members table stub).
+- Guards (all compile-time fatal `E_COMPILE_ERROR`): module must be in root
+  namespace; no nesting; module name may not collide with an existing class
+  (shared symbol space, ruling #5).
+
+**Taxonomy note (refines the earlier ruling):** the RFC says these violations
+raise "ParseError". In the engine, semantic *declaration* violations are
+`E_COMPILE_ERROR` fatals (uncatchable), matching how analogous namespace errors
+behave ("Cannot use X as namespace name", "namespace must be first"). True
+*syntax* errors remain catchable `ParseError`. So "ParseError" in the RFC maps
+to E_COMPILE_ERROR fatal for these semantic guards; documented here rather than
+inventing a catchable path the rest of the engine doesn't use.
+
+**Deferred to increment 2+ (unchanged plan):** `public`/`internal` visibility
+modifiers on module members (needs member-visibility grammar — plain `class`
+inside a manifest works today, `public class` does not yet parse); visibility
+ENFORCEMENT; `::` in `new`/type/extends grammar; the runtime-prologue
+handshake; two-tier autoload; forward-declaration ("claim") merging;
+ReflectionModule.

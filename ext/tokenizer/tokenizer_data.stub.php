@@ -239,6 +239,16 @@ const T_DEFAULT = UNKNOWN;
 const T_MATCH = UNKNOWN;
 /**
  * @var int
+ * @cvalue T_MODULE
+ */
+const T_MODULE = UNKNOWN;
+/**
+ * @var int
+ * @cvalue T_INTERNAL
+ */
+const T_INTERNAL = UNKNOWN;
+/**
+ * @var int
  * @cvalue T_BREAK
  */
 const T_BREAK = UNKNOWN;
