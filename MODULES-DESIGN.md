@@ -1,5 +1,33 @@
 # PHP Modules — Implementation Design Notes (branch: php-modules)
 
+## module:: forward references within a block (fix)
+
+Surfaced by playground code: `module::PaymentError` used inside `FakeGateway`
+fataled because `PaymentError` was declared *later* in the same `module { }`
+block. Root cause: `zend_resolve_class_name`'s ZEND_NAME_MODULE_SELF branch does
+an eager membership check against `mod->members`, but the member loop in
+`zend_compile_module` registered each member's name only just before compiling
+*that* member's body — so a body could only see members declared textually
+before it.
+
+Fix: added a name-registration **pre-pass** in `zend_compile_module`, before the
+body-compilation loop, that records every member's canonical name -> visibility
+(mirroring exactly the conditions the main loop uses: claims, nested-module
+claims, and class-like decls; static const/func/prop live in the backing class
+and are not module members). The main loop's later re-registration is idempotent.
+Result: `module::Member` resolves regardless of declaration order, while a
+genuine typo (`module::Nope`) is still an E_COMPILE_ERROR (module_018 unchanged).
+Test module_046. Bare module-relative names already resolved lazily and were
+unaffected.
+
+Known remaining edge: a forward reference *through a later-declared nested inline
+module* (`module::Inner::Widget` where `Inner` is declared after the referrer)
+still doesn't resolve — the pre-pass registers direct members but not a nested
+module's own members, which only exist after the nested module compiles. A
+general fix would need recursive pre-registration of the nested module subtree.
+Deferred; declaring the nested module before its referrers (or using a bare
+relative name) works today.
+
 Working notes for the vertical-slice implementation of the Modules RFC draft
 (author: __adrian). This file tracks decisions, deviations from the draft, and
 implementation findings; it is not part of the proposal itself.
