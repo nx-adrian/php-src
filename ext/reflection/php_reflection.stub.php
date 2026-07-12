@@ -166,6 +166,8 @@ final class ReflectionGenerator
 
 class ReflectionMethod extends ReflectionFunctionAbstract
 {
+    /** PHP Modules: distinct from isInternal() (extension/core-defined). */
+    public function isModuleInternal(): bool {}
     /** @cvalue ZEND_ACC_STATIC */
     public const int IS_STATIC = UNKNOWN;
     /** @cvalue ZEND_ACC_PUBLIC */
@@ -236,6 +238,8 @@ class ReflectionMethod extends ReflectionFunctionAbstract
 /** @not-serializable */
 class ReflectionClass implements Reflector
 {
+    /** PHP Modules: distinct from isInternal() (extension/core-defined). */
+    public function isModuleInternal(): bool {}
     /**
      * @cvalue ZEND_ACC_IMPLICIT_ABSTRACT_CLASS
      * @todo deprecate
@@ -452,6 +456,8 @@ enum PropertyHookType: string
 /** @not-serializable */
 class ReflectionProperty implements Reflector
 {
+    /** PHP Modules: distinct from isInternal() (extension/core-defined). */
+    public function isModuleInternal(): bool {}
     /** @cvalue ZEND_ACC_STATIC */
     public const int IS_STATIC = UNKNOWN;
     /** @cvalue ZEND_ACC_READONLY */
@@ -583,6 +589,8 @@ class ReflectionProperty implements Reflector
 /** @not-serializable */
 class ReflectionClassConstant implements Reflector
 {
+    /** PHP Modules: distinct from isInternal() (extension/core-defined). */
+    public function isModuleInternal(): bool {}
     /** @cvalue ZEND_ACC_PUBLIC */
     public const int IS_PUBLIC = UNKNOWN;
     /** @cvalue ZEND_ACC_PROTECTED */
