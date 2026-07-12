@@ -1791,3 +1791,45 @@ and a genuine typo still reports `Undefined constant`. **Verified:** new test `m
 playground `module-playground/07_cold_static_chain/` (fails pre-fix, passes after). Full suite green:
 66 module tests, `Zend/tests` clean (only the pre-existing `arginfo_zpp_mismatch` failures), reflection
 and spl suites clean; enum `Foo::Bar::class`, const-chains, and `"foo"::class` behavior unchanged.
+
+## Static access to a NAMESPACED member (`Module::Ns\Member::CONST`)
+
+**Bug.** A module member may be public *and* namespaced — the RFC's own example is
+`VendorName\User::Auth\PasswordChecker`. Such a member could be used as a class *reference*
+(`new` / `instanceof` / type / `catch` / `extends`, which accept `module_qualified_name`) but a
+*static-access* chain on it — `Module::Ns\Member::CONST` / `::method()` / `::$prop` / `::class` — was a
+**ParseError**. Those positions (`class_constant`, `static_member`, static call, and `::class`, which is
+`class_constant` with the identifier `class`) take only a single `identifier` after `::`; a qualified
+segment (`Auth\Checker`) is a `T_NAME_QUALIFIED`, not an `identifier`, so the chain could not be built.
+Non-namespaced members worked (each simple segment is an `identifier`, reinterpreted by the compiler).
+
+**Why not just add `module_qualified_name` there.** Measured with bison 3.8.2 at `%expect 0`: dropping
+`module_qualified_name` into those positions reintroduces **39 conflicts** (1 shift/reduce + 38
+reduce/reduce) — its recursive `:: name` hop collides with the access's `:: identifier` on `T_STRING`
+segments. This is the wall the earlier notes record.
+
+**Fix (grammar only, conflict-free).** The missing capability is *only* the qualified segment, and
+`T_NAME_QUALIFIED` is a distinct token from `identifier`, so it cannot collide. A small nonterminal
+built solely from that token —
+```
+ns_member_ref:
+      class_name    T_PAAMAYIM_NEKUDOTAYIM T_NAME_QUALIFIED
+    | ns_member_ref T_PAAMAYIM_NEKUDOTAYIM T_NAME_QUALIFIED
+;
+```
+— threaded into `class_constant`, `static_member`, and the static call (`::class` comes along for free,
+since `class` is an `identifier`). It yields an FQ canonical name node (`Vendor\User::Auth\Checker`),
+which resolves through the ordinary FQ class path — the *same* path as `new Vendor\User::Auth\Checker()`
+— so no new resolution logic is needed and the B1 runtime hooks carry the cold-autoload case. Rebuilt
+with bison 3.8.2 at **`%expect 0`** (zero new conflicts). Only `zend_language_parser.y` changes; the
+generated parser is a build artifact.
+
+Known limitation: a *simple* class segment following a *qualified* one (`M::Auth\Checker::Sub::CONST`)
+is not covered — re-adding it costs 1 reduce/reduce conflict, so it stays out; the ordinary shape
+`Module::Ns\Member::CONST` at any depth of qualified segments is covered.
+
+**Verified:** new test `module_066` (cold-autoload of a namespaced public member via const/method/prop/
+`::class`, plus `new`/`instanceof`, plus internal-member identity-ungated/use-denied); playground
+`module-playground/audit/audit_r_namespaced_member_chains.php` (fails pre-fix, passes after). Full suite
+green: 67 module tests, `Zend/tests` clean (only the pre-existing `arginfo_zpp_mismatch` failures),
+reflection clean.

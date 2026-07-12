@@ -266,7 +266,7 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %type <ast> unprefixed_use_declarations const_decl inner_statement
 %type <ast> expr optional_expr while_statement for_statement foreach_variable
 %type <ast> foreach_statement declare_statement finally_statement unset_variable variable
-%type <ast> module_qualified_name module_member_list module_member module_member_inner
+%type <ast> module_qualified_name module_member_list module_member module_member_inner ns_member_ref
 %type <num> member_visibility
 %type <ast> extends_from parameter optional_type_without_static argument argument_no_expr global_var
 %type <ast> static_var class_statement trait_adaptation trait_precedence trait_alias
@@ -1504,6 +1504,8 @@ function_call:
 			/* PHP Modules: "module::f(...)" self-call to a backing-class static method. */
 	|	variable_class_name T_PAAMAYIM_NEKUDOTAYIM member_name argument_list
 			{ $$ = zend_ast_create(ZEND_AST_STATIC_CALL, $1, $3, $4); }
+	|	ns_member_ref T_PAAMAYIM_NEKUDOTAYIM member_name argument_list
+			{ $$ = zend_ast_create(ZEND_AST_STATIC_CALL, $1, $3, $4); }
 	|	callable_expr { $<num>$ = CG(zend_lineno); } argument_list {
 			$$ = zend_ast_create(ZEND_AST_CALL, $1, $3);
 			$$->lineno = $<num>2;
@@ -1620,6 +1622,20 @@ module_qualified_name:
 			{ $$ = zend_ast_create_module_qualified_name($1, $3); }
 ;
 
+/* PHP Modules: a module member whose member segment is NAMESPACED (a T_NAME_QUALIFIED,
+ * e.g. "Auth\Checker"), used as the class part of a static-access chain
+ * ("Vendor\User::Auth\Checker::CONST" / "::method()" / "::$prop" / "::class"). Built
+ * only from the distinct T_NAME_QUALIFIED token -- which is NOT an `identifier` -- so it
+ * cannot collide with the `:: identifier` member access (module_qualified_name in these
+ * positions instead reintroduces 39 conflicts). It yields an FQ canonical name node,
+ * resolved exactly like the same reference in `new`/`instanceof`. */
+ns_member_ref:
+		class_name T_PAAMAYIM_NEKUDOTAYIM T_NAME_QUALIFIED
+			{ $$ = zend_ast_create_module_qualified_name($1, $3); }
+	|	ns_member_ref T_PAAMAYIM_NEKUDOTAYIM T_NAME_QUALIFIED
+			{ $$ = zend_ast_create_module_qualified_name($1, $3); }
+;
+
 class_name_reference:
 		class_name		{ $$ = $1; }
 	|	new_variable	{ $$ = $1; }
@@ -1679,6 +1695,8 @@ class_constant:
 			{ $$ = zend_ast_create_class_const_or_name(zend_ast_create_module_backing_name(), $3); }
 			/* PHP Modules: "module::CONST" self-reference to a backing-class constant. */
 	|	variable_class_name T_PAAMAYIM_NEKUDOTAYIM identifier
+			{ $$ = zend_ast_create_class_const_or_name($1, $3); }
+	|	ns_member_ref T_PAAMAYIM_NEKUDOTAYIM identifier
 			{ $$ = zend_ast_create_class_const_or_name($1, $3); }
 	|	class_name T_PAAMAYIM_NEKUDOTAYIM '{' expr '}'
 			{ $$ = zend_ast_create(ZEND_AST_CLASS_CONST, $1, $4); }
@@ -1754,6 +1772,8 @@ static_member:
 			{ $$ = zend_ast_create(ZEND_AST_STATIC_PROP, zend_ast_create_module_backing_name(), $3); }
 			/* PHP Modules: "module::$x" self-reference to a backing-class static property. */
 	|	variable_class_name T_PAAMAYIM_NEKUDOTAYIM simple_variable
+			{ $$ = zend_ast_create(ZEND_AST_STATIC_PROP, $1, $3); }
+	|	ns_member_ref T_PAAMAYIM_NEKUDOTAYIM simple_variable
 			{ $$ = zend_ast_create(ZEND_AST_STATIC_PROP, $1, $3); }
 ;
 
