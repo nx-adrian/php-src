@@ -429,6 +429,15 @@ top_statement:
 	|	T_MODULE namespace_declaration_name ';'
 			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, NULL);
 			  RESET_DOC_COMMENT(); }
+	|	T_MODULE module_qualified_name ';'
+			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, NULL);
+			  RESET_DOC_COMMENT(); }
+			/* PHP Modules: standalone (file-level) membership in a nested module,
+			 * "module Outer::Inner;". The "::" canonical name is permitted only here,
+			 * where there is no enclosing definition to imply the parent — it names the
+			 * exact module this file joins. Inside a `module { … }` definition block the
+			 * parent is lexical, so members use plain names and this "::" form is not
+			 * reachable there (nor is a "::" block form), keeping "::" out of definitions. */
 	|	T_MODULE namespace_declaration_name { RESET_DOC_COMMENT(); }
 		'{' module_member_list '}'
 			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, $5); }
