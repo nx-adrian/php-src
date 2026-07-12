@@ -1824,12 +1824,33 @@ which resolves through the ordinary FQ class path — the *same* path as `new Ve
 with bison 3.8.2 at **`%expect 0`** (zero new conflicts). Only `zend_language_parser.y` changes; the
 generated parser is a build artifact.
 
-Known limitation: a *simple* class segment following a *qualified* one (`M::Auth\Checker::Sub::CONST`)
-is not covered — re-adding it costs 1 reduce/reduce conflict, so it stays out; the ordinary shape
-`Module::Ns\Member::CONST` at any depth of qualified segments is covered.
+`ns_member_ref` covers a *single* class-name seed followed by qualified segments
+(`Vendor\User::Auth\Checker`, `M::A\B::C\D`), which handles a top-level module with a namespaced member.
+It does **not** by itself reach a namespaced member of a *nested* module — `Outer::Inner::Auth\Checker`,
+where simple nested-module segments (`Outer::Inner`, a `variable_class_name`) precede the qualified
+member — because the qualified segment can only anchor to a single `class_name`, not to a multi-segment
+simple chain. (`new Outer::Inner::Auth\Checker()` parses via `module_qualified_name`, so only static
+access was missing.) One more production closes it, also conflict-free:
+```
+class_constant:  …
+    | variable_class_name T_PAAMAYIM_NEKUDOTAYIM T_NAME_QUALIFIED  { class_const_or_name }
+```
+This lets a qualified segment extend an existing simple chain, building a `CLASS_CONST` node that the
+existing chain reinterpretation (`zend_module_chain_canonical`) canonicalizes to `Outer::Inner::Auth\Checker`
+— so, again, no new resolution logic. Seeding instead from `class_constant` costs 2 shift/reduce
+conflicts; `variable_class_name` is the conflict-free seed. With both productions, **every** mixed
+simple/qualified static-access chain parses (`M::Simple::Auth\Checker::CONST`,
+`M::Auth\Checker::Simple::CONST`, `Root::A\B::Sim::C\D::CONST`, …); there is no remaining gap. `%expect 0`
+holds; only `zend_language_parser.y` changes.
 
-**Verified:** new test `module_066` (cold-autoload of a namespaced public member via const/method/prop/
-`::class`, plus `new`/`instanceof`, plus internal-member identity-ungated/use-denied); playground
-`module-playground/audit/audit_r_namespaced_member_chains.php` (fails pre-fix, passes after). Full suite
-green: 67 module tests, `Zend/tests` clean (only the pre-existing `arginfo_zpp_mismatch` failures),
-reflection clean.
+An important invariant preserved throughout: an ordinary class-constant chain whose value *names a class*
+(`A::B::C`, read left-to-right) — including chained through a module member (`Mchain::C::PATH::Z`) — is
+byte-for-byte unchanged, as are enum-case / FQCN / string `::class`. Guarded by
+`module-playground/audit/audit_s_const_chain_interactions.php`, which passes on the pre-fix build too.
+
+**Verified:** tests `module_066` (top-level namespaced member) and `module_067` (namespaced member of a
+nested module) — cold-autoload via const/method/prop/`::class`, plus `new`/`instanceof`, plus
+internal-member identity-ungated/use-denied; playground audits `audit_r` (namespaced chains, fails
+pre-fix) and `audit_s` (const-chain interactions, non-regression guard). Full suite green: 68 module
+tests, `Zend/tests` clean (only the pre-existing `arginfo_zpp_mismatch` failures), reflection/spl clean;
+the const-chain corpus is identical to the pre-fix engine.
