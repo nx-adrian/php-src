@@ -27,11 +27,10 @@ var_dump(class_exists("Outer::Inner"));
 echo Outer::Inner::IV, "\n";
 echo Outer::Inner::make(), "\n";
 
-// Nested member class: static access via chain; instance via dynamic name (the
-// 3-segment class-reference form `new Outer::Inner::Gadget` is a known grammar gap).
+// Nested member class: static access via chain, and direct instantiation through
+// the multi-"::" class reference "new Outer::Inner::Gadget".
 echo Outer::Inner::Gadget::tag(), "\n";
-$c = "Outer::Inner::Gadget";
-echo (new $c)->who(), "\n";
+echo (new Outer::Inner::Gadget)->who(), "\n";
 
 // Reflection sees the nested module and its members
 $r = new ReflectionModule("Outer::Inner");

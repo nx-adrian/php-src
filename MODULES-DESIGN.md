@@ -1032,3 +1032,63 @@ access on nested member classes, and ReflectionModule("Outer::Inner"). Test modu
   RFC's absolute-`use` import of module members is unimplemented.
 - `internal module Inner` parses (visibility carried) but submodule-hidden-outside-parent
   is not yet enforced — the nested backing class isn't flagged internal.
+
+---
+
+## Increment: arbitrary-depth `::` in class-reference positions (Feature 1)
+
+**Goal:** make `Name::Member` — and chained `A::B::…::Member` to *any* depth — work in
+every class-reference position (`new`, `instanceof`, `extends`, `implements`, and
+parameter/return/property type declarations), not just static access. Previously only a
+single `::` (`Module::Member`) was wired into `new_variable`; `new Outer::Inner::Gadget`
+did not parse.
+
+**Key realization:** arbitrary depth already worked in expression/const/static-call/
+static-property positions (they self-recurse through `class_constant`/`variable_class_name`,
+and the compiler's `zend_try_module_chain_class` walks the chain to any depth). The gap was
+isolated to the class-reference grammar, which hard-capped at one `::`.
+
+**Grammar (`zend_language_parser.y`):**
+- `module_qualified_name` made left-recursive (`module_qualified_name :: name`) — covers
+  `extends` and type positions to arbitrary depth.
+- `new_variable` gained a subsequent-hop rule (`new_variable :: name`) so `new`/`instanceof`
+  chain; the "name vs `$var`" one-token lookahead keeps it distinct from the static-property
+  hop, so `%expect 0` still holds (bison reports zero conflicts).
+
+**Compiler (`zend_compile.c`):**
+- `zend_ast_create_module_qualified_name` now (a) guards a non-string left operand
+  (`new $x::Foo` -> clean "Illegal class name"), and (b) preserves a `module::`-relative
+  chain (`ZEND_NAME_MODULE_SELF`) across hops so `module::Inner::Gadget` stays relative.
+- The `module::` self-reference membership check was generalized to derive the owning module
+  from the **last** `::` (so `module::Inner::Gadget` verifies against sub-module `Outer::Inner`).
+
+**Enforcement bug surfaced + fixed (`zend_object_handlers.c`):** `zend_module_scope_allows`
+derived a member's owning module from the **first** `::`, mis-attributing `Outer::Inner::Secret`
+to module `Outer` instead of `Outer::Inner`. Chained access was the first path to exercise
+this. Fixed to split at the last `::` (new helper `zend_module_owner_last_sep`), used for both
+the member and the accessing scope.
+
+**Autoload bug surfaced + fixed (`zend_execute_API.c`):** the tier-2 `::`->`\` transform used
+`zend_string_dup`, which returns the *same* interned buffer for an interned literal — so the
+in-place transform corrupted the shared `"Module::Member"` literal (visible as `new A::C`
+reporting `Class "A\CC" not found`). Fixed to always allocate a private copy via
+`zend_string_init`, and the module two-tier logic is now gated on the prefix genuinely being a
+module (`ZEND_ACC_MODULE`); a plain `A::C` falls through and is reported cleanly as
+`Class "A::C" not found`.
+
+**BC note (now documented in the RFC):** `Name::bareword` in a class-reference position is now
+valid syntax, so `new A::C` on an ordinary class changes from a *parse* error to a *runtime*
+"class not found" `Error`. Two upstream tests
+(`Zend/tests/new_without_parentheses/*constant`, `*static_method`) asserted the old parse
+error and were updated. Expression-position `A::C` (class-constant fetch) is unchanged.
+
+**Tests:** `module_033` de-worked-around (`new Outer::Inner::Gadget` directly); new
+`module_034_chained_class_ref` covers new/instanceof at depth 2–3, `extends`, param/return
+type hints, single- and multi-segment `module::` self-refs, internal enforcement through the
+chain, and the `new $x::Foo` guard. Full modules suite (36) + `new_without_parentheses` (12)
+green; 661 namespace/type/class regression tests green.
+
+**Gaps resolved:** the first bullet above (3+ segment class-reference form) is now done.
+Remaining Feature-2/3 gaps unchanged: `use Module::Member` and `internal module` enforcement.
+Nested cross-file module autoload (tier-1/tier-2 still key off the first `::`) is deferred to
+the membership/loading work (Feature 4).
