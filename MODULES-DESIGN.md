@@ -490,3 +490,39 @@ lists is a separate `::`-coverage task (touches the shared `name_list`, used als
 by `catch` and trait `use`), deferred to avoid conflict risk. **Not yet done:**
 `module::` static functions/properties (`module::foo()`, `module::$x`) — the
 module-level statics storage/resolution model (C8) is the next increment.
+
+## Increment 12 (planned) — module-level statics via a synthetic backing class
+
+**Decision (agreed):** represent each module's static members (static functions,
+static properties, constants) as a hidden `zend_class_entry` keyed by the plain
+module name `M` (no `::`). `M::f()` / `M::C` / `M::$x` (external) and
+`module::f()` / `module::C` / `module::$x` (internal) then reuse the engine's
+existing static-method / class-constant / static-property storage, dispatch,
+opcache persistence, and reflection. Chosen over bespoke module storage for the
+code reuse and because module/class already share one symbol space.
+
+**Build approach:** synthesize a class-declaration AST from the module body's
+static/const members and run it through `zend_compile_class_decl`, marked
+non-instantiable (`new M()` must be rejected — Instantiable Modules is future
+scope). Module `internal static` members carry `ZEND_ACC_MODULE_INTERNAL` so the
+existing runtime same-module enforcement applies unchanged.
+
+**Known friction to handle (found while scoping):**
+- *Naming.* `zend_compile_class_decl` prefixes every class name with the current
+  module (`zend_prefix_class_with_module_and_ns`, ~line 9658). The backing class
+  must be named plainly `M`, not `M::M`. Fix: exempt the module's own backing
+  class from prefixing (special-case), while still compiling its method bodies
+  with `FC(current_module)` set so bare/`module::` names inside them resolve.
+- *Grammar.* The module body does not yet parse `static function` or `static`
+  property (only class-like decls + `const`). Add these to `module_member`.
+  Add `module::` in call/prop/const positions (`T_MODULE :: member_name
+  argument_list`, `T_MODULE :: simple_variable`, `T_MODULE :: identifier`) —
+  increment 11 only added `module::` in class-reference position.
+- *Non-instantiability + collision.* Creating class `M` means `new M()` and a
+  later user `class M {}` must both error cleanly (the latter already does via the
+  shared-symbol check; the former needs the non-instantiable flag).
+
+**Suggested sub-slices (commit at each green checkpoint):** (a) backing class +
+module constants (`M::C`, `module::C`); (b) module static functions (`M::f()`,
+`module::f()`); (c) module static properties (`M::$x`, `module::$x`). Static
+properties last (initialization/storage is the heaviest piece).
