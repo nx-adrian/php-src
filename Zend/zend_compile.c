@@ -10489,6 +10489,58 @@ ZEND_API zend_ast *zend_ast_create_module_backing_name(void) /* {{{ */
 }
 /* }}} */
 
+/* PHP Modules: before any member body is compiled, register the canonical name ->
+ * visibility of every member in a module subtree — at all nesting depths — so that
+ * a "module::Member" self-reference resolves regardless of the textual order of
+ * declarations, including a reference that reaches into a nested inline module
+ * declared later in the block (e.g. "module::Inner::Widget"). Only the compile-time
+ * membership map (mod->members) is populated here; rosters and backing classes are
+ * built by the real compilation pass. Static const/func/prop live in the backing
+ * class and are not module members, so they are skipped. Runs once at the outermost
+ * module (see the guard at the call site); zend_register_module is idempotent, so a
+ * nested module's later real compilation reuses these entries. */
+static void zend_preregister_module_subtree(zend_string *mod_name, const zend_ast *stmt_ast)
+{
+	if (!stmt_ast) {
+		return;
+	}
+	zend_php_module *mod = zend_register_module(mod_name);
+	const zend_ast_list *members = zend_ast_get_list(stmt_ast);
+	for (uint32_t i = 0; i < members->children; i++) {
+		const zend_ast *member = members->child[i];
+		ZEND_ASSERT(member->kind == ZEND_AST_MODULE_MEMBER);
+		uint32_t visibility = member->attr;
+		zend_ast *decl = member->child[0];
+		zend_string *simple = NULL;
+		bool nested_inline = false;
+
+		if (decl->kind == ZEND_AST_MODULE_CLAIM) {
+			simple = zend_ast_get_str(decl->child[0]);
+		} else if (decl->kind == ZEND_AST_MODULE) {
+			simple = zend_ast_get_str(decl->child[0]);
+			nested_inline = (decl->child[1] != NULL);   /* has a body: recurse into it */
+		} else if (decl->kind == ZEND_AST_CONST_DECL
+				|| decl->kind == ZEND_AST_METHOD
+				|| decl->kind == ZEND_AST_PROP_GROUP) {
+			continue;
+		} else if (zend_ast_is_decl(decl)) {
+			simple = ((zend_ast_decl *) decl)->name;
+		}
+		if (!simple) {
+			continue;
+		}
+		zend_string *canonical = zend_string_concat3(
+			ZSTR_VAL(mod_name), ZSTR_LEN(mod_name), "::", 2, ZSTR_VAL(simple), ZSTR_LEN(simple));
+		zend_string *lc = zend_string_tolower(canonical);
+		zend_hash_update_ptr(&mod->members, lc, (void*)(uintptr_t) visibility);
+		zend_string_release(lc);
+		if (nested_inline) {
+			zend_preregister_module_subtree(canonical, decl->child[1]);
+		}
+		zend_string_release(canonical);
+	}
+}
+
 static void zend_compile_module(const zend_ast *ast) /* {{{ */
 {
 	zend_ast *name_ast = ast->child[0];
@@ -10598,43 +10650,17 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 		 * the member's visibility in ->attr and the real declaration as child[0]. */
 		const zend_ast_list *members = zend_ast_get_list(stmt_ast);
 
-		/* Pre-pass: register every member's canonical name -> visibility BEFORE any
-		 * member body is compiled, so a "module::Member" self-reference resolves
-		 * regardless of declaration order within the block. Without this, a member
-		 * body could only see members declared textually before it (no forward
-		 * references). The set registered here mirrors exactly what the main loop
-		 * below records; static const/func/prop live in the backing class and are
-		 * not module members, so they are skipped. Re-registration in the main loop
-		 * is idempotent (same key -> same visibility). */
-		for (uint32_t i = 0; i < members->children; i++) {
-			zend_ast *member = members->child[i];
-			ZEND_ASSERT(member->kind == ZEND_AST_MODULE_MEMBER);
-			uint32_t pv = member->attr;
-			zend_ast *pdecl = member->child[0];
-			zend_string *psimple = NULL;
-
-			if (pdecl->kind == ZEND_AST_MODULE_CLAIM
-			 || (pdecl->kind == ZEND_AST_MODULE && pdecl->child[1] == NULL)) {
-				psimple = zend_ast_get_str(pdecl->child[0]);
-			} else if (pdecl->kind == ZEND_AST_CONST_DECL
-					|| pdecl->kind == ZEND_AST_METHOD
-					|| pdecl->kind == ZEND_AST_PROP_GROUP) {
-				continue;
-			} else if (zend_ast_is_decl(pdecl)) {
-				psimple = ((zend_ast_decl *) pdecl)->name;
-			}
-			if (!psimple) {
-				continue;
-			}
-			zend_string *pcanon = zend_string_concat3(
-				ZSTR_VAL(name), ZSTR_LEN(name), "::", 2, ZSTR_VAL(psimple), ZSTR_LEN(psimple));
-			zend_string *plc = zend_string_tolower(pcanon);
-			zend_hash_update_ptr(&mod->members, plc, (void*)(uintptr_t) pv);
-			zval pvzv;
-			ZVAL_LONG(&pvzv, (zend_long) pv);
-			zend_hash_update(roster, plc, &pvzv);
-			zend_string_release(pcanon);
-			zend_string_release(plc);
+		/* Pre-pass: register the canonical name -> visibility of every member in
+		 * this module's whole subtree (all nesting depths) BEFORE any member body
+		 * compiles, so a "module::Member" self-reference resolves regardless of
+		 * declaration order — including references reaching into a nested inline
+		 * module declared later. Guarded to the outermost module (parent_module is
+		 * NULL): an inline nested module compiled during the pass below already had
+		 * its members registered by its enclosing module's pre-pass. The main loop
+		 * below re-registers this module's own direct members into mod->members and
+		 * the roster; that is idempotent for mod->members. */
+		if (!parent_module) {
+			zend_preregister_module_subtree(name, stmt_ast);
 		}
 
 		for (uint32_t i = 0; i < members->children; i++) {
