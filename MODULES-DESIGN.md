@@ -1785,12 +1785,32 @@ to autoload (the engine forbids autoload during compilation), so the fix is at r
   in tier 1 and fall through to a normal, cleanly-reported autoload.
 
 Net: identity is still ungated (`::class`, `instanceof`), `internal` members reached via a chain from
-outside now give the clean `Cannot access internal module member` error (not `Undefined constant`),
-and a genuine typo still reports `Undefined constant`. **Verified:** new test `module_065`
+outside give the clean `Cannot access internal module member` error, and a genuine typo/undefined member
+reports `"M::Foo" is not a member of module "M"` (see next section). **Verified:** new test `module_065`
 (cold-autoload of every chain form, inline + nested + split-file, plus enforcement/diagnostics);
 playground `module-playground/07_cold_static_chain/` (fails pre-fix, passes after). Full suite green:
 66 module tests, `Zend/tests` clean (only the pre-existing `arginfo_zpp_mismatch` failures), reflection
 and spl suites clean; enum `Foo::Bar::class`, const-chains, and `"foo"::class` behavior unchanged.
+
+## Consistent "not a member of module" diagnostic
+
+A reference to an undefined member of a module — a typo, or an unclaimed split-file symbol not reachable
+via `::` — previously reported two different things for the same cause: a module known at compile time
+folded `M::Foo` to a class reference and failed with `Class "M::Foo" not found`, while an autoloaded
+module fell through the cold-path constant fetch to `Undefined constant M::Foo`. Both now report
+`"M::Foo" is not a member of module "M"` — the wording already used by the compile-time `module::Member`
+self-reference check (`zend_compile.c`). Two sites, each of which already has the module in hand:
+- `report_class_fetch_error` (name-based class fetch — covers `M::Foo::…`, `new M::Foo`, types, …): when
+  a not-found `Mod::Member` names a real `ZEND_ACC_MODULE` whose `Member` is not in the roster, emit the
+  member message; a `Member` that *is* in the roster but failed to load stays `Class … not found` (a
+  genuine load failure, not a membership problem — the roster distinguishes the two).
+- `ZEND_FETCH_CLASS_CONSTANT` (the B1 cold-path fallback): when the backing class is a module and the
+  name is neither a module constant nor a declared member, emit the member message instead of
+  `Undefined constant`.
+Non-module classes are untouched (`A::NOPE` still `Undefined constant A::NOPE`; a missing plain class
+still `Class "…" not found`). Tests: `module_065` updated to assert the unified wording; guarded in
+`module-playground/audit/audit_p_cold_autoload_chains.php`. Decoded in
+`module-playground/RESOLUTION-EDGE-CASES.md`.
 
 ## Static access to a NAMESPACED member (`Module::Ns\Member::CONST`)
 

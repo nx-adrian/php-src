@@ -47,7 +47,7 @@ echo Shop::Secret::class, "\n";           // identity of an internal member is u
 
 // Internal member reached via a chain from outside: denied cleanly.
 try { echo Shop::Secret::KEY; } catch (\Error $e) { echo $e->getMessage(), "\n"; }
-// A genuine typo is still an undefined constant, not silently resolved.
+// A genuine typo (undefined member) is reported as such, not silently resolved.
 try { echo Shop::Nope::X; } catch (\Error $e) { echo $e->getMessage(), "\n"; }
 ?>
 --CLEAN--
@@ -68,4 +68,4 @@ line
 made
 Shop::Secret
 Cannot access internal module member "Shop::Secret" from outside its module
-Undefined constant Shop::Nope
+"Shop::Nope" is not a member of module "Shop"
