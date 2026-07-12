@@ -183,10 +183,26 @@ static zend_string *zend_build_runtime_definition_key(zend_string *name, uint32_
 
 static bool zend_get_unqualified_name(const zend_string *name, const char **result, size_t *result_len) /* {{{ */
 {
-	const char *ns_separator = zend_memrchr(ZSTR_VAL(name), '\\', ZSTR_LEN(name));
+	const char *val = ZSTR_VAL(name);
+	size_t len = ZSTR_LEN(name);
+	const char *ns_separator = zend_memrchr(val, '\\', len);
+
+	/* PHP Modules: a canonical member name may use the "::" module boundary (e.g.
+	 * "Billing::Ledger", "Billing::Auth\Checker"). The unqualified name is the segment
+	 * after the rightmost separator, whether that separator is "\" or "::". */
+	const char *last_cc = NULL;
+	for (const char *p = val; (p = zend_memnstr(p, "::", 2, val + len)) != NULL; p += 2) {
+		last_cc = p;
+	}
+	if (last_cc != NULL && (ns_separator == NULL || last_cc > ns_separator)) {
+		*result = last_cc + 2;
+		*result_len = val + len - *result;
+		return true;
+	}
+
 	if (ns_separator != NULL) {
 		*result = ns_separator + 1;
-		*result_len = ZSTR_VAL(name) + ZSTR_LEN(name) - *result;
+		*result_len = val + len - *result;
 		return true;
 	}
 

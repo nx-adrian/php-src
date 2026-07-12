@@ -496,6 +496,12 @@ use_declaration:
 			{ $$ = zend_ast_create(ZEND_AST_USE_ELEM, $1, NULL); }
 	|	legacy_namespace_name T_AS T_STRING
 			{ $$ = zend_ast_create(ZEND_AST_USE_ELEM, $1, $3); }
+	|	module_qualified_name
+			{ $$ = zend_ast_create(ZEND_AST_USE_ELEM, $1, NULL); }
+			/* PHP Modules: import a module member, "use Billing::Ledger;" (and, chained,
+			 * "use Outer::Inner::Gadget;"). The alias defaults to the last segment. */
+	|	module_qualified_name T_AS T_STRING
+			{ $$ = zend_ast_create(ZEND_AST_USE_ELEM, $1, $3); }
 ;
 
 const_list:
