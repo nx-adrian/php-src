@@ -9661,7 +9661,15 @@ static void zend_compile_class_decl(znode *result, const zend_ast *ast, bool top
 			type = "a trait name";
 		}
 		zend_assert_valid_class_name(unqualified_name, type);
-		name = zend_prefix_class_with_module_and_ns(unqualified_name);
+		if (decl->flags & ZEND_ACC_MODULE) {
+			/* PHP Modules: the synthetic backing class is named plainly after the
+			 * module (its name IS the module boundary), so it is not module-prefixed
+			 * even though it is compiled while FC(current_module) is set (which its
+			 * method bodies need for module-relative resolution). */
+			name = zend_string_copy(unqualified_name);
+		} else {
+			name = zend_prefix_class_with_module_and_ns(unqualified_name);
+		}
 		name = zend_new_interned_string(name);
 		lcname = zend_string_tolower(name);
 
@@ -10390,6 +10398,18 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 				continue;
 			}
 
+			/* Module-level static functions become static methods of the backing
+			 * class. An `internal` one carries ZEND_ACC_MODULE_INTERNAL, enforced by
+			 * the existing static-method dispatch gate (zend_std_get_static_method ->
+			 * zend_module_scope_allows). */
+			if (decl->kind == ZEND_AST_METHOD) {
+				if (visibility == ZEND_MODULE_MEMBER_INTERNAL) {
+					((zend_ast_decl *) decl)->flags |= ZEND_ACC_MODULE_INTERNAL;
+				}
+				backing_stmts = zend_ast_list_add(backing_stmts, decl);
+				continue;
+			}
+
 			/* Record the member's canonical name -> visibility before compiling, so
 			 * self-referential internal access within the manifest resolves. */
 			if (zend_ast_is_decl(decl)) {
@@ -10410,23 +10430,24 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 
 			zend_compile_top_stmt(decl);
 		}
+
+		/* Backing class holding the module's static members. Compiled while
+		 * current_module is STILL set, so its method bodies resolve module-relative
+		 * names (bare member classes, module::X). Its own name stays plain ("M", not
+		 * "M::M") because zend_compile_class_decl skips module-prefixing for a
+		 * ZEND_ACC_MODULE decl. The flag also makes it non-instantiable
+		 * ("Cannot instantiate module M") and non-extendable. */
+		if (zend_ast_get_list(backing_stmts)->children > 0) {
+			zend_string *backing_name = zend_string_copy(name);
+			zend_ast *backing = zend_ast_create_decl(ZEND_AST_CLASS,
+				ZEND_ACC_MODULE, ast->lineno, NULL,
+				backing_name, NULL, NULL, backing_stmts, NULL, NULL);
+			zend_compile_top_stmt(backing);
+			zend_string_release(backing_name);
+		}
+
 		zend_string_release(FC(current_module));
 		FC(current_module) = NULL;
-	}
-
-	/* Emit the backing class once the module's own members are compiled and
-	 * current_module is cleared, so its name is the plain module name ("M"), not
-	 * module-prefixed ("M::M"). Flagged ZEND_ACC_MODULE, which makes it
-	 * non-instantiable (new M() -> "Cannot instantiate module M") and non-extendable
-	 * ("Class X cannot extend module M"). */
-	if (zend_ast_get_list(backing_stmts)->children > 0) {
-		ZEND_ASSERT(FC(current_module) == NULL);
-		zend_string *backing_name = zend_string_copy(name);
-		zend_ast *backing = zend_ast_create_decl(ZEND_AST_CLASS,
-			ZEND_ACC_MODULE, ast->lineno, NULL,
-			backing_name, NULL, NULL, backing_stmts, NULL, NULL);
-		zend_compile_top_stmt(backing);
-		zend_string_release(backing_name);
 	}
 	/* A membership declaration (no block, `module Foo;`) leaves current_module set
 	 * for the remainder of the file so subsequent declarations are module-owned; its

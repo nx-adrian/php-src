@@ -1475,6 +1475,9 @@ function_call:
 		}
 	|	class_name T_PAAMAYIM_NEKUDOTAYIM member_name argument_list
 			{ $$ = zend_ast_create(ZEND_AST_STATIC_CALL, $1, $3, $4); }
+	|	T_MODULE T_PAAMAYIM_NEKUDOTAYIM member_name argument_list
+			{ $$ = zend_ast_create(ZEND_AST_STATIC_CALL, zend_ast_create_module_backing_name(), $3, $4); }
+			/* PHP Modules: "module::f(...)" self-call to a backing-class static method. */
 	|	variable_class_name T_PAAMAYIM_NEKUDOTAYIM member_name argument_list
 			{ $$ = zend_ast_create(ZEND_AST_STATIC_CALL, $1, $3, $4); }
 	|	callable_expr { $<num>$ = CG(zend_lineno); } argument_list {
@@ -1516,6 +1519,13 @@ module_member:
 			{ $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, $2); }
 	|	member_visibility T_CONST const_list ';'
 			{ $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, $3); }
+	|	member_visibility T_STATIC function returns_ref identifier backup_doc_comment '(' parameter_list ')'
+		return_type backup_fn_flags method_body backup_fn_flags
+			{ zend_ast *m = zend_ast_create_decl(ZEND_AST_METHOD,
+				  $4 | ZEND_ACC_PUBLIC | ZEND_ACC_STATIC | $13, $3, $6,
+				  zend_ast_get_str($5), $8, NULL, $12, $10, NULL);
+			  CG(extra_fn_flags) = $11;
+			  $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, m); }
 ;
 
 /* PHP Modules (experimental): a module-qualified class reference,

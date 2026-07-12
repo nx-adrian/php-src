@@ -5,7 +5,7 @@ Modules: module-level constants live on a non-instantiable backing class (M::C /
 module Billing {
     public const RATE = 15;
     public const LABEL = "vat";
-    public const DERIVED = Billing::RATE * 2;   // const-expr referencing a sibling const
+    public const DERIVED = module::RATE * 2;   // const-expr self-reference to a sibling const
 
     public class Calc {
         // module::CONST self-reference from inside the module

@@ -622,3 +622,42 @@ is in place.
 their name): interacts with the membership/re-declaration lifecycle (a `module M;`
 membership file must not collide with, nor recreate, the manifest's backing
 class), so it belongs with the forward-declaration/claim work. Documented in 12(a).
+
+## Increment 12(b) — module static functions
+
+Module-level `static function` members become static methods of the backing class.
+
+- **Grammar.** `module_member` gains `member_visibility T_STATIC function ...`
+  (static is mandatory per the RFC; a non-static `function` in a module body is a
+  parse error). Produces a `ZEND_AST_METHOD` wrapped in `ZEND_AST_MODULE_MEMBER`.
+  `module::f(...)` added to the static-call production (`T_MODULE :: member_name
+  argument_list`, via the bare backing-class ref). `M::f()` external needs no new
+  grammar. `%expect 0` holds.
+- **Routing.** `zend_compile_module` partitions `ZEND_AST_METHOD` members into the
+  backing class (like constants). Internal ones get `ZEND_ACC_MODULE_INTERNAL`.
+- **Internal enforcement is essentially free.** Static-method dispatch already
+  gates `ZEND_ACC_MODULE_INTERNAL` through `zend_std_get_static_method ->
+  zend_module_scope_allows` (now backing-class-aware). So `Billing::secret()` from
+  outside throws "Cannot call internal method ... from outside its module" with no
+  new code — unlike constants, methods are never compile-time folded, so a single
+  runtime gate suffices.
+
+### Naming friction resolved, and a semantics clarification
+
+The backing class is now compiled with **`FC(current_module)` still set**, because
+its method bodies (and const expressions) must resolve module-relative names
+(`module::X`, bare member classes). The backing class's own name is kept plain
+("Billing", not "Billing::Billing") because `zend_compile_class_decl` skips module
+prefixing for a `ZEND_ACC_MODULE` decl.
+
+Consequence (intended, consistent with namespaces): inside module M, a reference to
+the module's **own full name** `M::X` module-prefixes to `M::M::X` — exactly as
+`Foo\Bar` inside `namespace Foo` becomes `Foo\Foo\Bar`. The idiomatic self-reference
+is `module::X`. `module_019`'s `DERIVED` const was updated from `Billing::RATE` to
+`module::RATE` to reflect this (its previous success relied on the backing class
+being compiled without module context, which no longer holds now that method bodies
+need it).
+
+Test module_023. 24 module + 524 core (class/method/static/grammar/ns/trait/const/
+enum) tests green. Follow-ups: static **properties** (slice c); internal **const**
+enforcement (still deferred); a clearer parse error for a non-static module function.
