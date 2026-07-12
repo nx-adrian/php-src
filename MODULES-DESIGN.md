@@ -1000,3 +1000,35 @@ Class-fetch gating already denies internal *classes* before the constructor is e
 consulted, so the (class visibility × constructor visibility) matrix resolves as: an
 internal class denies first; a public class with an internal constructor denies at
 construction. Test module_032. 34 module + 814 object/class/reflection tests green.
+
+## Nested modules (C7) — flat boundary model
+
+`module Outer { public module Inner { … } }` now declares a nested module named
+canonically `Outer::Inner`, with members `Outer::Inner::member`. Per rec #11 this is a
+pure naming boundary — nesting grants no access relationship (no `parent::`, no implicit
+access to the enclosing module's internals).
+
+- **Grammar:** `module_member` gains `member_visibility T_MODULE namespace_declaration_name
+  '{' module_member_list '}'` → a `ZEND_AST_MODULE` node wrapped as a member. `%expect 0`.
+- **Compile:** `zend_compile_module` qualifies a nested module's name with the enclosing
+  module (`Outer` + `::` + `Inner`), and saves/restores `FC(current_module)` around the
+  nested block so members after it stay owned by the outer module. Backing class
+  `Outer::Inner` (ZEND_ACC_MODULE); members prefixed `Outer::Inner::…`.
+- **Resolution:** the chained-`::` helper (`zend_module_chain_canonical`) was generalized
+  to arbitrary depth — it walks the nested `CLASS_CONST` chain, resolves only the root
+  segment, and reinterprets when the "module = everything before the last `::`" prefix is
+  a real module. So `Outer::Inner::IV` / `::make()` / `Outer::Inner::Gadget::tag()` resolve.
+
+Verified: nested declaration, backing class, nested constants/static-functions, static
+access on nested member classes, and ReflectionModule("Outer::Inner"). Test module_033.
+34 module + 142 grammar/class/ns/const tests green.
+
+**Gaps (grammar in the conflict-prone class-reference position; follow-ups):**
+- `new Outer::Inner::Gadget` / `instanceof` / `extends` — the 3-segment class-*reference*
+  form does not parse (only 2-segment `Module::Member` is wired into new_variable). Static
+  access works; for instantiation the workaround is a dynamic name
+  (`$c = "Outer::Inner::Gadget"; new $c;`).
+- `use Outer::Inner::Gadget;` (and `use Module::Member` generally) does not parse — the
+  RFC's absolute-`use` import of module members is unimplemented.
+- `internal module Inner` parses (visibility carried) but submodule-hidden-outside-parent
+  is not yet enforced — the nested backing class isn't flagged internal.
