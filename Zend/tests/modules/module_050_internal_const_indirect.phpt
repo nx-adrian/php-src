@@ -14,7 +14,7 @@ module M {
     public const SECPATH = "M::Sec";   // a PUBLIC const holding an internal type's name
     public class Api {
         public static function insideDirect(): string { return Sec::H; }
-        public static function insideWalk(): string { $c = module::SECPATH; return $c::H; }
+        public static function insideWalk(): string { return module::SECPATH::H; }
     }
 }
 class X { const Y = 'Z'; }
