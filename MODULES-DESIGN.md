@@ -586,3 +586,39 @@ tests green; 505 core const/class/ns/grammar/enum/trait tests green.
   always-creating an empty backing class would close it — a small (B)-leaning step).
 - Next slices: (b) static functions `M::f()` / `module::f()`; (c) static properties
   `M::$x` / `module::$x`.
+
+## Increment 12(a) follow-ups — ZEND_ACC_MODULE flag, messages, module-scope generalization
+
+Cleanups on top of 12(a):
+
+- **`ZEND_ACC_MODULE` (class-flag bit 31).** The backing class now carries a
+  dedicated flag instead of `ZEND_ACC_EXPLICIT_ABSTRACT_CLASS`. Added to the
+  `ZEND_ACC_UNINSTANTIABLE` mask, so `new M()` throws **"Cannot instantiate
+  module M"** (not "abstract class"). The inheritance check rejects extending it
+  with **"Class X cannot extend module M"**. (module_021, module_022.)
+- **Shared-symbol check is now module-aware.** `zend_compile_module` ignores an
+  existing class named M when it is the module's own backing class
+  (`ZEND_ACC_MODULE`); a real user `class M` still collides. This prevents the
+  backing class from being mistaken for a foreign collision on module re-entry.
+- **`zend_module_scope_allows` generalized + exported.** It now derives a class's
+  module from either the `Module::` name prefix (member classes) *or* the backing
+  class's own name (`ZEND_ACC_MODULE`). Same behavior as before for internal
+  *methods* (member classes are unchanged), and ready for backing-class member
+  enforcement. Now `ZEND_API`, declared in zend_compile.h.
+
+**Deferred — internal enforcement of module static members (constants now;
+functions/properties later).** `internal const` is currently compiled as public.
+Enforcing it properly requires gating **three** routes, exactly as internal
+*methods* do: compile-time constant folding (`zend_verify_ct_const_access`), the
+`ZEND_FETCH_CLASS_CONSTANT` VM handler (cache-slot aware), and
+`zend_get_class_constant_ex` (used by `constant()`/reflection). A partial gate on
+only one route is a security footgun (blocks `constant()` but not a folded
+`M::SECRET`), so this is deferred to a single dedicated "internal static-member
+enforcement" increment covering constants, functions, and properties uniformly
+with the generalized `zend_module_scope_allows`. The groundwork (flag + helper)
+is in place.
+
+**Also deferred — always-create backing class** (so static-less modules reserve
+their name): interacts with the membership/re-declaration lifecycle (a `module M;`
+membership file must not collide with, nor recreate, the manifest's backing
+class), so it belongs with the forward-declaration/claim work. Documented in 12(a).

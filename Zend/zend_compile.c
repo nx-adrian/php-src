@@ -10334,9 +10334,12 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 		zend_error_noreturn(E_COMPILE_ERROR, "Module declarations cannot be nested");
 	}
 
-	/* Shared symbol space: a module name may not collide with an existing class. */
+	/* Shared symbol space: a module name may not collide with an existing class.
+	 * The module's own backing class (ZEND_ACC_MODULE) is not a collision — that is
+	 * how the module reserves its name — so ignore it. */
 	zend_string *lc_name = zend_string_tolower(name);
-	if (zend_hash_exists(CG(class_table), lc_name)) {
+	zend_class_entry *existing_ce = zend_hash_find_ptr(CG(class_table), lc_name);
+	if (existing_ce && !(existing_ce->ce_flags & ZEND_ACC_MODULE)) {
 		zend_string_release(lc_name);
 		zend_error_noreturn(E_COMPILE_ERROR,
 			"Cannot declare module \"%s\": a class with that name already exists", ZSTR_VAL(name));
@@ -10373,10 +10376,14 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 			 * not global constants. Collect them as class-const groups; they are
 			 * compiled below as part of the backing class, not here. */
 			if (decl->kind == ZEND_AST_CONST_DECL) {
-				/* TODO(module statics): map internal -> ZEND_ACC_MODULE_INTERNAL and
-				 * enforce it on the class-constant fetch path. For now all module
-				 * constants are accessible (public); internal-const enforcement is a
-				 * follow-up. */
+				/* Module constants become class constants of the backing class.
+				 * TODO(module internal statics): `internal` constants should carry
+				 * ZEND_ACC_MODULE_INTERNAL and be gated on the fetch path. That gate
+				 * must cover all three routes — compile-time folding, the
+				 * ZEND_FETCH_CLASS_CONSTANT VM handler, and zend_get_class_constant_ex
+				 * — exactly like internal *methods*, so it is deferred to a dedicated
+				 * internal-static-member enforcement increment (shared with functions
+				 * and properties). For now module constants are accessible (public). */
 				zend_ast *group = zend_ast_create(ZEND_AST_CLASS_CONST_GROUP, decl, NULL, NULL);
 				group->attr = ZEND_ACC_PUBLIC;
 				backing_stmts = zend_ast_list_add(backing_stmts, group);
@@ -10409,13 +10416,14 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 
 	/* Emit the backing class once the module's own members are compiled and
 	 * current_module is cleared, so its name is the plain module name ("M"), not
-	 * module-prefixed ("M::M"). Marked abstract to make it non-instantiable
-	 * (new M() is rejected); a module-specific flag/message is a later refinement. */
+	 * module-prefixed ("M::M"). Flagged ZEND_ACC_MODULE, which makes it
+	 * non-instantiable (new M() -> "Cannot instantiate module M") and non-extendable
+	 * ("Class X cannot extend module M"). */
 	if (zend_ast_get_list(backing_stmts)->children > 0) {
 		ZEND_ASSERT(FC(current_module) == NULL);
 		zend_string *backing_name = zend_string_copy(name);
 		zend_ast *backing = zend_ast_create_decl(ZEND_AST_CLASS,
-			ZEND_ACC_EXPLICIT_ABSTRACT_CLASS, ast->lineno, NULL,
+			ZEND_ACC_MODULE, ast->lineno, NULL,
 			backing_name, NULL, NULL, backing_stmts, NULL, NULL);
 		zend_compile_top_stmt(backing);
 		zend_string_release(backing_name);
