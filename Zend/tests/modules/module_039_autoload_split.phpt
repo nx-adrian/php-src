@@ -12,8 +12,8 @@ file_put_contents("$dir/Shop.Auth.Checker.php", "<?php\nmodule Shop;\nnamespace 
 
 // Nested module: definition (with nested claims) + split-file nested bodies.
 file_put_contents("$dir/Outer.def.php", "<?php\nmodule Outer {\n    public module Inner {\n        public Gadget;\n        internal Secret;\n    }\n}\n");
-file_put_contents("$dir/Outer.Inner.Gadget.php", "<?php\nmodule Outer;\nmodule Inner;\nclass Gadget { public function w(): string { return 'gadget'; } }\n");
-file_put_contents("$dir/Outer.Inner.Secret.php", "<?php\nmodule Outer;\nmodule Inner;\nclass Secret { public function s(): string { return 'secret'; } }\n");
+file_put_contents("$dir/Outer.Inner.Gadget.php", "<?php\nmodule Outer::Inner;\nclass Gadget { public function w(): string { return 'gadget'; } }\n");
+file_put_contents("$dir/Outer.Inner.Secret.php", "<?php\nmodule Outer::Inner;\nclass Secret { public function s(): string { return 'secret'; } }\n");
 
 spl_autoload_register(function ($name) use ($dir) {
     $map = [

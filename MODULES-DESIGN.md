@@ -1305,3 +1305,23 @@ property flag bit exists (bit 13). But the plumbing is **cross-cutting, not stra
 That is a real language-feature addition touching hot property-write paths with assertion risk,
 not a contained change. **Deferred as pending work.** The RFC keeps it as intended design; the
 PoC does not implement it (symmetric `internal` on properties — module_027 — does work).
+
+---
+
+## Refinement: standalone `module Outer::Inner;` membership (re-allowed, scoped)
+
+Reversing the earlier removal: the file-level statement `module Outer::Inner;` is re-allowed —
+but *only* as a standalone (top-level) membership directive, where a file has no enclosing
+definition to imply the parent, so naming the module's canonical `::` identity is the honest,
+concise spelling. The rule "no `::` inside a definition" holds automatically: the `::` form is
+reachable only from the top-level `module` statement; inside a `module { … }` block nested
+modules use plain names, and neither a `::` membership nor a `::` block form is reachable there
+(verified: `module Outer { module Inner::Deep { … } }` and `module Outer::Inner { … }` both
+ParseError). This keeps top-level and nested modules structurally identical for split files —
+`module Outer;` and `module Outer::Inner;` are the same mechanism at different depths. The
+chained form (`module Outer; module Inner;`) also still works. `%expect 0` holds; no leaks;
+module_039 uses the `::` form. 42 module tests green.
+
+Remaining nested-split gap (unchanged): a *body-less nested-module claim* `public module Inner;`
+inside a definition still does not parse (only `public module Inner { … }`), so a nested
+module's own definition cannot yet be forward-declared for splitting — only its member bodies.
