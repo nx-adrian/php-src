@@ -203,11 +203,42 @@ where the module is already registered. Dynamic references (`new $string`) and
 cross-file references before the owning manifest is loaded are NOT yet gated —
 that needs the runtime-prologue membership check + handshake (increment 3).
 
-**Deferred to increment 3+:** `::` in `new`/type/extends is DONE; remaining:
-runtime + cross-file internal enforcement via the membership handshake;
-two-tier autoload; forward-declaration ("claim") merging + membership-file
-members that fill claims; nested modules; `internal` on *class members*
-(methods/props) as opposed to module top-level members; module `static`
+### Increment 3 (2026-07-07) — two-tier autoload. DONE.
+
+Implemented and tested (10 phpt total; leak-free; no regression in
+classes/autoload/spl/namespaces):
+
+- **Two-tier autoload** in `zend_lookup_class_ex` (the class-resolution
+  chokepoint). When a `Module::Member` class is not yet defined:
+  - **Tier 1**: if the module isn't registered, autoload it by its bare name
+    (`Vendor\User`); the member may be defined inline in the manifest, so
+    re-check the class table afterward.
+  - **Tier 2**: transform the boundary `::`→`\` and autoload the resulting
+    backslash name (`Vendor\User\Auth\PasswordChecker`); the membership sub-file
+    registers the class under its canonical `::` key, so re-check the class
+    table under that `::` key (NOT the backslash autoload name).
+  - **Strict Tier-2 verification** (the design's open item, resolved strict):
+    because we look the member up under the `::` key, a plain non-module class
+    at the backslash name does NOT satisfy a module reference — returns NULL.
+  Verified against a real on-disk PSR-4-style layout with an unmodified
+  Composer-shaped autoloader: `new Vendor\User::Profile()` loads via Tier 1
+  (inline in manifest), `new Vendor\User::Auth\PasswordChecker()` via Tier 2
+  (separate file). The autoloader needs zero module-specific logic.
+
+**Honest gap (documented, deferred to increment 4):** internal-member
+enforcement is still compile-time/static only. A member reached purely via
+autoload (module not known when the referencing file compiled) is NOT gated —
+e.g. `new Vendor\User::Secret()` from outside, where `Secret` is internal and
+the module is autoloaded at runtime, currently succeeds. Closing this needs the
+runtime membership prologue (a per-op_array module-context check that sets
+"currently executing inside module X") so the autoload path can ask "is the
+caller inside the owning module?". The out-of-order standalone include of a
+membership file (loading a sub-file directly before its manifest) uses that
+same prologue and is likewise deferred.
+
+**Deferred to increment 4+:** runtime/handshake internal enforcement (above);
+forward-declaration ("claim") merging + membership sub-files filling claims;
+nested modules; `internal` on *class members* (methods/props); module `static`
 functions/properties + `module::` self-reference; asymmetric-visibility
-interplay; ReflectionModule. Also an audit pass for `::`-name consumers
-(serialize `O:` strings, var_export) per the canonical-key implication above.
+interplay; ReflectionModule; `::`-name consumer audit (serialize/var_export);
+`use`-alias resolution of the module segment.
