@@ -363,6 +363,17 @@ ZEND_API zval *zend_get_class_constant_ex(zend_string *class_name, zend_string *
 				goto failure;
 			}
 
+			/* PHP Modules: a module-internal constant is reachable only from inside
+			 * its own module (it is public at the class level). */
+			if (UNEXPECTED(ZEND_CLASS_CONST_FLAGS(c) & ZEND_ACC_MODULE_INTERNAL_MEMBER)
+					&& !zend_module_scope_allows(c->ce, scope)) {
+				if ((flags & ZEND_FETCH_CLASS_SILENT) == 0) {
+					zend_throw_error(NULL, "Cannot access internal module constant %s::%s from outside its module",
+						ZSTR_VAL(class_name), ZSTR_VAL(constant_name));
+				}
+				goto failure;
+			}
+
 			if (UNEXPECTED(ce->ce_flags & ZEND_ACC_TRAIT)) {
 				/** Prevent accessing trait constants directly on cases like \defined() or \constant(), etc. */
 				if ((flags & ZEND_FETCH_CLASS_SILENT) == 0) {

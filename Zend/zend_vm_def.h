@@ -6199,6 +6199,16 @@ ZEND_VM_HANDLER(181, ZEND_FETCH_CLASS_CONSTANT, VAR|CONST|UNUSED|CLASS_FETCH, CO
 				HANDLE_EXCEPTION();
 			}
 
+			/* PHP Modules: a module-internal constant is reachable only from inside
+			 * its own module (it is public at the class level). */
+			if (UNEXPECTED(ZEND_CLASS_CONST_FLAGS(c) & ZEND_ACC_MODULE_INTERNAL_MEMBER)
+					&& !zend_module_scope_allows(c->ce, scope)) {
+				zend_throw_error(NULL, "Cannot access internal module constant %s::%s from outside its module", ZSTR_VAL(ce->name), ZSTR_VAL(constant_name));
+				ZVAL_UNDEF(EX_VAR(opline->result.var));
+				FREE_OP2();
+				HANDLE_EXCEPTION();
+			}
+
 			if (ce->ce_flags & ZEND_ACC_TRAIT) {
 				zend_throw_error(NULL, "Cannot access trait constant %s::%s directly", ZSTR_VAL(ce->name), ZSTR_VAL(constant_name));
 				ZVAL_UNDEF(EX_VAR(opline->result.var));

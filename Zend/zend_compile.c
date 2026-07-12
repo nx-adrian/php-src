@@ -1943,6 +1943,12 @@ static bool zend_verify_ct_const_access(const zend_class_constant *c, const zend
 		 * because the ce is replaced to the class entry of the composing class
 		 * on binding. */
 		return 0;
+	} else if ((ZEND_CLASS_CONST_FLAGS(c) & ZEND_ACC_MODULE_INTERNAL_MEMBER)
+			&& !zend_module_scope_allows(c->ce, scope)) {
+		/* PHP Modules: don't compile-time fold an internal module constant that is
+		 * accessed from outside its module — defer to the runtime fetch gate, which
+		 * throws. From inside the module it folds like any public constant. */
+		return 0;
 	} else if (ZEND_CLASS_CONST_FLAGS(c) & ZEND_ACC_PUBLIC) {
 		return 1;
 	} else if (ZEND_CLASS_CONST_FLAGS(c) & ZEND_ACC_PRIVATE) {
@@ -9398,14 +9404,6 @@ static void zend_compile_class_const_decl(zend_ast *ast, uint32_t flags, zend_as
 	zend_class_entry *ce = CG(active_class_entry);
 	uint32_t i, children = list->children;
 
-	/* PHP Modules: `internal` constants are flag-plumbed (bit 14) but not yet
-	 * enforced — a class constant can be folded at compile time and reached via
-	 * three separate routes, all of which must gate together. Until that gate
-	 * lands, reject rather than expose an unenforced internal constant. */
-	if (UNEXPECTED(flags & ZEND_ACC_MODULE_INTERNAL_MEMBER)) {
-		zend_error_noreturn(E_COMPILE_ERROR,
-			"internal module constants are not yet supported; declare the constant public");
-	}
 
 	for (i = 0; i < children; ++i) {
 		zend_class_constant *c;

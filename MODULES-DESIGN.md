@@ -776,3 +776,36 @@ Result: internal now works for member classes, methods, and properties (static +
 instance); only internal *constants* remain. Tests module_027 (properties),
 module_025 (const still rejected). 29 module + ~1700 core (property/object/
 reflection/type/ns/class/trait) tests green across this and the strict_types fix.
+
+## Increment 14 — internal constants (three-route fetch gate) — `internal` complete
+
+Completes `internal` visibility. A class constant can be reached by three routes,
+all of which now gate on `ZEND_ACC_MODULE_INTERNAL_MEMBER`:
+
+1. **Compile-time folding.** `zend_verify_ct_const_access` returns 0 for an internal
+   constant accessed from outside the module (refusing to fold), deferring to the
+   runtime opcode; from inside it folds like any public constant.
+2. **VM handler `ZEND_FETCH_CLASS_CONSTANT`.** Gates right after the existing
+   private/protected `zend_verify_const_access`, using `EX(func)->op_array.scope`.
+   Cache-slot reuse is safe (per-call-site scope, like private/protected).
+3. **`zend_get_class_constant_ex`** (used by `constant()` and reflection value
+   reads that go through visibility). Gates after `zend_verify_const_access`.
+
+All emit "Cannot access internal module constant M::C from outside its module".
+The compile-time rejection stub is removed.
+
+**Reflection intentionally bypasses**, exactly as it does for `private` — verified
+that `ReflectionClassConstant::getValue()` reads a private constant's value too.
+This matches the revised RFC ("reflection reads/invocations bypass internal exactly
+as private").
+
+Test module_025 (renamed to `module_025_internal_constants`) covers all routes +
+the reflection bypass. 29 module + 461 constant/enum/const-expr/trait tests green.
+
+**`internal` is now complete** across every member kind: module member classes,
+methods (module-level static functions and member-class methods), properties
+(module-level static and member-class instance), and constants — each enforced at
+compile and runtime, with the strict_types bit collision fixed. Remaining module
+roadmap items are unrelated to `internal`: chained `::` (C6 → nested modules C7,
+`Module::Class::member`), preload persistence, and the forward-declaration/claim
+membership handshake.
