@@ -1192,6 +1192,26 @@ ZEND_API bool zend_is_valid_class_name(const zend_string *name) {
 	return 1;
 }
 
+/* PHP Modules: a private, mutable copy of the first `len` bytes of `src` with every
+ * "::" module boundary replaced by a single "\\" -- the name a PSR-4 autoloader sees
+ * for a module or a member sub-file. The result is never longer than the source. */
+static zend_string *zend_module_autoload_name(const char *src, size_t len)
+{
+	zend_string *s = zend_string_alloc(len, 0);
+	char *d = ZSTR_VAL(s);
+	const char *e = src + len;
+	while (src < e) {
+		if (src + 1 < e && src[0] == ':' && src[1] == ':') {
+			*d++ = '\\';
+			src += 2;
+		} else {
+			*d++ = *src++;
+		}
+	}
+	*d = '\0';
+	return zend_string_truncate(s, d - ZSTR_VAL(s), 0);
+}
+
 ZEND_API zend_class_entry *zend_lookup_class_ex(zend_string *name, zend_string *key, uint32_t flags) /* {{{ */
 {
 	zend_class_entry *ce = NULL;
@@ -1289,76 +1309,66 @@ ZEND_API zend_class_entry *zend_lookup_class_ex(zend_string *name, zend_string *
 		return NULL;
 	}
 
-	/* PHP Modules: two-tier autoload for a module-qualified name "Module::Member".
-	 * Tier 1 loads the module manifest (the member may be defined inline there);
-	 * Tier 2 transforms "::"->"\" and autoloads the membership sub-file, which
-	 * registers the class under its canonical "::" key. */
+	/* PHP Modules: n-tier autoload for a module-qualified name "A::B::...::Member".
+	 * Every "::" boundary is a module level; to reach the member, each enclosing
+	 * module's definition must be loaded, outermost first (a nested module's visibility
+	 * reconciles against its parent's claim, so the parent must load first). The earlier
+	 * two-tier form loaded only the outermost level -- correct only when nested modules
+	 * are defined inline in the parent's file. A nested module SPLIT into its own file
+	 * (claimed by the parent, defined in "A\\B.php") was never loaded, so its claims/
+	 * members were absent when the member compiled. Load each level, then the member. */
 	{
-		const char *sep = zend_memnstr(ZSTR_VAL(lc_name), "::", 2,
-			ZSTR_VAL(lc_name) + ZSTR_LEN(lc_name));
-		if (sep) {
-			size_t mod_len = sep - ZSTR_VAL(lc_name);
-			zend_string *mod_lc = zend_string_init(ZSTR_VAL(lc_name), mod_len, 0);
+		const char *val = ZSTR_VAL(lc_name);
+		const char *lend = val + ZSTR_LEN(lc_name);
+		const char *first_sep = zend_memnstr(val, "::", 2, lend);
+		if (first_sep) {
+			/* `name` (original case) may carry a leading "\\" that lc_name dropped;
+			 * offsets computed on lc_name index into name + this offset. */
+			size_t name_off = (ZSTR_VAL(name)[0] == '\\') ? 1 : 0;
+			const char *nval = ZSTR_VAL(name) + name_off;
+			bool is_module_path = true;
 
-			/* Tier 1: ensure the module manifest is loaded. Presence is the module's
-			 * backing class (ZEND_ACC_MODULE) — a persisted class entry, so this works
-			 * for preloaded modules where the per-request registry would be empty. If
-			 * the prefix already exists as a non-module class, it is NOT a module and
-			 * we do not autoload it as one. */
-			zend_class_entry *bce = zend_hash_find_ptr(EG(class_table), mod_lc);
-			if (!bce) {
-				zend_string *mod_name = zend_string_init(ZSTR_VAL(name), mod_len, 0);
-				zend_autoload(mod_name, mod_lc);
-				zend_string_release_ex(mod_name, 0);
-				bce = zend_hash_find_ptr(EG(class_table), mod_lc);
-				/* The member may now be inline-defined in the manifest. */
-				zv = zend_hash_find(EG(class_table), lc_name);
+			/* Load each enclosing module level: the prefix before every "::". */
+			for (const char *sep = first_sep; sep != NULL;
+					sep = zend_memnstr(sep + 2, "::", 2, lend)) {
+				size_t plen = (size_t) (sep - val);
+				zend_string *prefix_lc = zend_string_init(val, plen, 0);
+				zend_class_entry *pce = zend_hash_find_ptr(EG(class_table), prefix_lc);
+				if (!pce) {
+					/* Autoload this level: the outermost level is a bare module name;
+					 * a deeper level "A::B" is autoloaded as "A\\B". */
+					zend_string *load_name = zend_module_autoload_name(nval, plen);
+					zend_string *load_lc = zend_string_tolower(load_name);
+					zend_autoload(load_name, load_lc);
+					zend_string_release_ex(load_name, 0);
+					zend_string_release_ex(load_lc, 0);
+					pce = zend_hash_find_ptr(EG(class_table), prefix_lc);
+					/* The member may become defined inline as a level loads. */
+					if (!zv) {
+						zv = zend_hash_find(EG(class_table), lc_name);
+					}
+				}
+				zend_string_release_ex(prefix_lc, 0);
+				if (!pce || !(pce->ce_flags & ZEND_ACC_MODULE)) {
+					/* Not a module at this level -> "A::B::C" is an ordinary (missing)
+					 * class name; fall through to normal autoload, reported unchanged. */
+					is_module_path = false;
+					break;
+				}
 			}
 
-			/* Only run module-specific resolution when the prefix is genuinely a
-			 * module. Otherwise "A::C" is an ordinary (missing) class name — do NOT
-			 * apply the "::"->"\" sub-file transform; fall through so the name is
-			 * reported cleanly as "A::C" rather than a mangled sub-file variant. */
-			if (bce && (bce->ce_flags & ZEND_ACC_MODULE)) {
-				/* Tier 2: transform the boundary to "\" and autoload the sub-file.
-				 * Use zend_string_init (never zend_string_dup): the fetched name is
-				 * typically an interned literal, and zend_string_dup returns that same
-				 * interned buffer, so an in-place transform would corrupt the shared
-				 * "Module::Member" literal. We need a private mutable copy. */
+			if (is_module_path) {
+				/* Member: if still uncompiled after the enclosing levels loaded (one of
+				 * them may have defined it inline), autoload its sub-file under the
+				 * transformed "\\" name; it registers under the canonical "::" key. */
 				if (!zv) {
-					/* Replace EVERY "::" boundary with "\" so a nested member like
-					 * "Outer::Inner::Gadget" maps to the sub-file name "Outer\Inner\Gadget"
-					 * (a single-segment member "Shop::User" becomes "Shop\User"). Copying
-					 * left-to-right into the same private buffer is safe because the result
-					 * is never longer than the source. */
-					zend_string *bs_name = zend_string_init(ZSTR_VAL(name), ZSTR_LEN(name), 0);
-					char *src = ZSTR_VAL(bs_name);
-					char *dst = src;
-					char *e = src + ZSTR_LEN(bs_name);
-					while (src < e) {
-						if (src + 1 < e && src[0] == ':' && src[1] == ':') {
-							*dst++ = '\\';
-							src += 2;
-						} else {
-							*dst++ = *src++;
-						}
-					}
-					/* Null-terminate at the compacted (shorter) length: zend_string_truncate's
-					 * refcount-1 fast path reallocs and updates the length but does NOT write the
-					 * terminator, so without this the byte at the new length keeps a stale char
-					 * (e.g. "Shop::Product" -> "Shop\Product" leaves a trailing 't'), which trips
-					 * the not-null-terminated assertion when the string is later freed. */
-					*dst = '\0';
-					bs_name = zend_string_truncate(bs_name, dst - ZSTR_VAL(bs_name), 0);
+					zend_string *bs_name = zend_module_autoload_name(nval, ZSTR_LEN(lc_name));
 					zend_string *bs_lc = zend_string_tolower(bs_name);
 					zend_autoload(bs_name, bs_lc);
 					zend_string_release_ex(bs_name, 0);
 					zend_string_release_ex(bs_lc, 0);
-					/* The sub-file registered the class under its canonical "::" key. */
 					zv = zend_hash_find(EG(class_table), lc_name);
 				}
-
-				zend_string_release_ex(mod_lc, 0);
 				zend_hash_del(&EG(autoload_current_classnames), lc_name);
 				if (!key) {
 					zend_string_release_ex(lc_name, 0);
@@ -1372,10 +1382,6 @@ ZEND_API zend_class_entry *zend_lookup_class_ex(zend_string *name, zend_string *
 				}
 				return NULL;
 			}
-
-			/* Not a module member: clean up and fall through to normal autoload,
-			 * which reports the canonical "Module::Member"-shaped name unchanged. */
-			zend_string_release_ex(mod_lc, 0);
 		}
 	}
 
