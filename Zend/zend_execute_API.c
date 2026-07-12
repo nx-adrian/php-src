@@ -1809,7 +1809,7 @@ static ZEND_COLD void report_class_fetch_error(const zend_string *class_name, ui
 	}
 }
 
-static bool zend_module_runtime_access_denied(const zend_class_entry *ce);
+ZEND_API bool zend_module_runtime_access_denied(const zend_class_entry *ce);
 
 zend_class_entry *zend_fetch_class(zend_string *class_name, uint32_t fetch_type) /* {{{ */
 {
@@ -1916,7 +1916,7 @@ static zend_class_entry *zend_module_current_user_scope(void)
 	return (ex && ex->func) ? ex->func->common.scope : NULL;
 }
 
-static bool zend_module_runtime_access_denied(const zend_class_entry *ce)
+ZEND_API bool zend_module_runtime_access_denied(const zend_class_entry *ce)
 {
 	bool have_scope = false;
 	zend_class_entry *scope = NULL;

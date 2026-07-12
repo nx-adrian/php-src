@@ -164,6 +164,10 @@ ZEND_API bool zend_module_scope_allows(const zend_class_entry *member_ce, const 
 /* True if `scope` may see the internal nested module whose backing class is `module_ce`
  * — i.e. scope is inside that module's own subtree, or is a direct member of its parent. */
 ZEND_API bool zend_module_scope_can_see_module(const zend_class_entry *module_ce, const zend_class_entry *scope);
+/* True if the currently-executing code may NOT access internal member `ce` (an internal
+ * class, or a public member of an internal nested module). Used to gate name-based fetch
+ * and object-based construction ("new $escaped") uniformly. */
+ZEND_API bool zend_module_runtime_access_denied(const zend_class_entry *ce);
 ZEND_API zend_ast *zend_ast_create_module_qualified_name(zend_ast *module_ast, zend_ast *member_ast);
 /* "module::Member": a class-like reference to a member of the current module,
  * resolved at compile time against FC(current_module). */
