@@ -45,13 +45,13 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %define api.pure full
 %define api.value.type {zend_parser_stack_elem}
 %define parse.error verbose
-/* PHP Modules (experimental): the module-boundary "::" in a class-reference
- * position (new/instanceof via class_name_reference) introduces exactly one
- * shift/reduce conflict — "instanceof A::B" (module-qualified type) vs
- * "instanceof A::$prop" (static-property class expr). Bison's default (shift)
- * selects the module-qualified interpretation, which is the intended behavior.
- * See MODULES-DESIGN.md (grammar spike) for the full analysis. */
-%expect 1
+/* PHP Modules (experimental): module-qualified class references use "::" with
+ * ZERO added grammar conflicts. The key is that the module case shares the
+ * "class_name ::" prefix with the existing static-property rule (see
+ * new_variable), so the parser defers the decision until the token after "::"
+ * (a bareword name vs a $variable), which is within LALR(1) lookahead. This
+ * preserves "new/instanceof Foo::$staticProp". See MODULES-DESIGN.md. */
+%expect 0
 
 %destructor { zend_ast_destroy($$); } <ast>
 %destructor { if ($$) zend_string_release_ex($$, 0); } <str>
@@ -1527,7 +1527,6 @@ module_qualified_name:
 
 class_name_reference:
 		class_name		{ $$ = $1; }
-	|	module_qualified_name	{ $$ = $1; }
 	|	new_variable	{ $$ = $1; }
 	|	'(' expr ')'	{ $$ = $2; }
 ;
@@ -1670,6 +1669,13 @@ new_variable:
 			{ $$ = zend_ast_create(ZEND_AST_STATIC_PROP, $1, $3); }
 	|	new_variable T_PAAMAYIM_NEKUDOTAYIM simple_variable
 			{ $$ = zend_ast_create(ZEND_AST_STATIC_PROP, $1, $3); }
+	|	class_name T_PAAMAYIM_NEKUDOTAYIM name
+			{ $$ = zend_ast_create_module_qualified_name($1, $3); }
+			/* PHP Modules: a module-qualified class reference "Module::Member"
+			 * shares the "class_name ::" prefix with the static-property rule
+			 * above, so the parser branches on the token after "::" (a bareword
+			 * name vs a $variable) within LALR(1) — no grammar conflict, and
+			 * "new/instanceof Foo::$staticProp" is preserved. */
 ;
 
 member_name:
