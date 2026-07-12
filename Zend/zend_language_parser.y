@@ -1523,6 +1523,8 @@ module_member:
 module_qualified_name:
 		name T_PAAMAYIM_NEKUDOTAYIM name
 			{ $$ = zend_ast_create_module_qualified_name($1, $3); }
+	|	T_MODULE T_PAAMAYIM_NEKUDOTAYIM name
+			{ $$ = zend_ast_create_module_self_qualified_name($3); }
 ;
 
 class_name_reference:
@@ -1676,6 +1678,9 @@ new_variable:
 			 * above, so the parser branches on the token after "::" (a bareword
 			 * name vs a $variable) within LALR(1) — no grammar conflict, and
 			 * "new/instanceof Foo::$staticProp" is preserved. */
+	|	T_MODULE T_PAAMAYIM_NEKUDOTAYIM name
+			{ $$ = zend_ast_create_module_self_qualified_name($3); }
+			/* PHP Modules: "module::Member" self-reference in new/instanceof. */
 ;
 
 member_name:
