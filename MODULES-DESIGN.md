@@ -1,5 +1,29 @@
 # PHP Modules — Implementation Design Notes (branch: php-modules)
 
+## Tier-2 autoload transform: missing null terminator (memory bug fix)
+
+Found while stress-testing split-file autoload from the playground. The tier-2
+autoload transform in `zend_execute_API.c` compacts "Module::Member" -> "Module\Member"
+in place (each "::" -> "\" shortens the name by one byte) and then calls
+`zend_string_truncate` to the new length. `zend_string_truncate`'s refcount-1 fast
+path reallocs and sets `ZSTR_LEN` but does NOT write `val[len] = '\0'` — it assumes
+the caller already terminated. We didn't, so the byte at the new length kept a stale
+character ("Shop::Product" -> "Shop\Product" left a trailing 't'). The name was still
+usable by length (ZSTR_LEN was correct), so it only bit when that string escaped to a
+userland autoloader and was freed via the checked refcount path (e.g. the autoloader
+stored `$name`), tripping the debug `zend_string_destroy` "not null-terminated"
+assertion at shutdown — SIGABRT, heap-layout-dependent, intermittent. Pre-existing
+(reproduced on the parent commit); surfaced now only because the playground autoloader
+kept the transformed name alive.
+
+Fix: write `*dst = '\0'` at the compacted length before `zend_string_truncate`. One
+line. Diagnosed by temporarily instrumenting the debug `zend_string_destroy` to dump
+the offending string (reverted after) — no gdb/valgrind/ASAN available in-sandbox.
+Regression test module_047 captures the transformed name into a global so it lives to
+shutdown; it FAILS (aborts) without the fix and passes with it. Note module_039 also
+exercises tier-2 but didn't store the name, so its transient free stayed heap-dependent
+and didn't reliably catch this.
+
 ## module:: forward references within a block (fix)
 
 Surfaced by playground code: `module::PaymentError` used inside `FakeGateway`

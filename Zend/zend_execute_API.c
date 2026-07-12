@@ -1333,6 +1333,12 @@ ZEND_API zend_class_entry *zend_lookup_class_ex(zend_string *name, zend_string *
 							*dst++ = *src++;
 						}
 					}
+					/* Null-terminate at the compacted (shorter) length: zend_string_truncate's
+					 * refcount-1 fast path reallocs and updates the length but does NOT write the
+					 * terminator, so without this the byte at the new length keeps a stale char
+					 * (e.g. "Shop::Product" -> "Shop\Product" leaves a trailing 't'), which trips
+					 * the not-null-terminated assertion when the string is later freed. */
+					*dst = '\0';
 					bs_name = zend_string_truncate(bs_name, dst - ZSTR_VAL(bs_name), 0);
 					zend_string *bs_lc = zend_string_tolower(bs_name);
 					zend_autoload(bs_name, bs_lc);
