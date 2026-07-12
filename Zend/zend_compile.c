@@ -406,6 +406,7 @@ void zend_file_context_begin(zend_file_context *prev_context) /* {{{ */
 	FC(current_namespace) = NULL;
 	FC(in_namespace) = 0;
 	FC(has_bracketed_namespaces) = 0;
+	FC(current_module) = NULL;
 	FC(declarables).ticks = 0;
 	zend_hash_init(&FC(seen_symbols), 8, NULL, NULL, 0);
 }
@@ -413,6 +414,12 @@ void zend_file_context_begin(zend_file_context *prev_context) /* {{{ */
 
 void zend_file_context_end(const zend_file_context *prev_context) /* {{{ */
 {
+	/* PHP Modules: release a membership-declaration's module scope, which is held
+	 * open for the remainder of the file (the manifest-block form releases its own). */
+	if (FC(current_module)) {
+		zend_string_release(FC(current_module));
+		FC(current_module) = NULL;
+	}
 	zend_end_namespace();
 	zend_hash_destroy(&FC(seen_symbols));
 	CG(file_context) = *prev_context;
@@ -1085,12 +1092,25 @@ static zend_string *zend_concat_names(const char *name1, size_t name1_len, const
 }
 
 static zend_string *zend_prefix_with_ns(zend_string *name) {
+	zend_string *ns_prefixed;
 	if (FC(current_namespace)) {
 		const zend_string *ns = FC(current_namespace);
-		return zend_concat_names(ZSTR_VAL(ns), ZSTR_LEN(ns), ZSTR_VAL(name), ZSTR_LEN(name));
+		ns_prefixed = zend_concat_names(ZSTR_VAL(ns), ZSTR_LEN(ns), ZSTR_VAL(name), ZSTR_LEN(name));
 	} else {
-		return zend_string_copy(name);
+		ns_prefixed = zend_string_copy(name);
 	}
+	/* PHP Modules: a module-owned symbol gets the "<module>::" boundary prefix in
+	 * front of its (possibly namespace-prefixed) name, yielding e.g.
+	 * "VendorName\User::Auth\PasswordChecker". */
+	if (FC(current_module)) {
+		const zend_string *mod = FC(current_module);
+		zend_string *result = zend_string_concat3(
+			ZSTR_VAL(mod), ZSTR_LEN(mod), "::", 2,
+			ZSTR_VAL(ns_prefixed), ZSTR_LEN(ns_prefixed));
+		zend_string_release(ns_prefixed);
+		return result;
+	}
+	return ns_prefixed;
 }
 
 static zend_string *zend_resolve_non_class_name(
@@ -7252,7 +7272,10 @@ static zend_result zend_is_first_statement(const zend_ast *ast, bool allow_nop) 
 			if (!allow_nop) {
 				return FAILURE;
 			}
-		} else if (file_ast->child[i]->kind != ZEND_AST_DECLARE) {
+		} else if (file_ast->child[i]->kind != ZEND_AST_DECLARE
+				&& file_ast->child[i]->kind != ZEND_AST_MODULE) {
+			/* A leading module membership declaration (`module Foo;`) is permitted
+			 * before a namespace, exactly like `declare`. */
 			return FAILURE;
 		}
 		i++;
@@ -10125,6 +10148,86 @@ static void zend_compile_namespace(const zend_ast *ast) /* {{{ */
 }
 /* }}} */
 
+/* {{{ PHP Modules (experimental) registry */
+static void zend_php_module_dtor(zval *zv) {
+	zend_php_module *mod = Z_PTR_P(zv);
+	zend_string_release(mod->name);
+	zend_string_release(mod->lc_name);
+	zend_hash_destroy(&mod->members);
+	efree(mod);
+}
+
+ZEND_API zend_php_module *zend_lookup_module(zend_string *lc_name) {
+	if (!EG(module_registry)) {
+		return NULL;
+	}
+	return zend_hash_find_ptr(EG(module_registry), lc_name);
+}
+
+ZEND_API zend_php_module *zend_register_module(zend_string *name) {
+	zend_php_module *mod;
+	zend_string *lc_name = zend_string_tolower(name);
+
+	if (!EG(module_registry)) {
+		EG(module_registry) = pemalloc(sizeof(HashTable), 0);
+		zend_hash_init(EG(module_registry), 8, NULL, zend_php_module_dtor, 0);
+	}
+
+	mod = zend_hash_find_ptr(EG(module_registry), lc_name);
+	if (mod) {
+		/* Re-declaring the same module manifest is an error; forward-declaration
+		 * merging is a later increment. */
+		zend_string_release(lc_name);
+		return mod;
+	}
+
+	mod = emalloc(sizeof(zend_php_module));
+	mod->name = zend_string_copy(name);
+	mod->lc_name = lc_name;
+	zend_hash_init(&mod->members, 8, NULL, NULL, 0);
+	zend_hash_add_ptr(EG(module_registry), lc_name, mod);
+	return mod;
+}
+
+static void zend_compile_module(const zend_ast *ast) /* {{{ */
+{
+	zend_ast *name_ast = ast->child[0];
+	zend_ast *stmt_ast = ast->child[1];
+	zend_string *name = zend_ast_get_str(name_ast);
+
+	/* Module manifests and membership declarations live in the root namespace. */
+	if (FC(current_namespace)) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Module declaration \"%s\" must be in the root namespace", ZSTR_VAL(name));
+	}
+	if (FC(current_module)) {
+		zend_error_noreturn(E_COMPILE_ERROR, "Module declarations cannot be nested");
+	}
+
+	/* Shared symbol space: a module name may not collide with an existing class. */
+	zend_string *lc_name = zend_string_tolower(name);
+	if (zend_hash_exists(CG(class_table), lc_name)) {
+		zend_string_release(lc_name);
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Cannot declare module \"%s\": a class with that name already exists", ZSTR_VAL(name));
+	}
+	zend_string_release(lc_name);
+
+	zend_register_module(name);
+
+	FC(current_module) = zend_string_copy(name);
+
+	if (stmt_ast) {
+		/* Manifest block: compile the owned declarations under the module prefix. */
+		zend_compile_top_stmt(stmt_ast);
+		zend_string_release(FC(current_module));
+		FC(current_module) = NULL;
+	}
+	/* A membership declaration (no block, `module Foo;`) leaves current_module set
+	 * for the remainder of the file so subsequent declarations are module-owned. */
+}
+/* }}} */
+
 static void zend_compile_halt_compiler(const zend_ast *ast) /* {{{ */
 {
 	zend_ast *offset_ast = ast->child[0];
@@ -12099,6 +12202,9 @@ static void zend_compile_stmt(zend_ast *ast) /* {{{ */
 			break;
 		case ZEND_AST_NAMESPACE:
 			zend_compile_namespace(ast);
+			break;
+		case ZEND_AST_MODULE:
+			zend_compile_module(ast);
 			break;
 		case ZEND_AST_HALT_COMPILER:
 			zend_compile_halt_compiler(ast);

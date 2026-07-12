@@ -198,6 +198,11 @@ struct _zend_executor_globals {
 	HashTable *class_table;		/* class table */
 	HashTable *zend_constants;	/* constants table */
 
+	/* PHP Modules (experimental): per-request registry of declared module
+	 * manifests, keyed by lowercased module name. Lazily allocated on the first
+	 * module declaration; freed at request shutdown. Value is zend_php_module*. */
+	HashTable *module_registry;
+
 	zval          *vm_stack_top;
 	zval          *vm_stack_end;
 	zend_vm_stack  vm_stack;
