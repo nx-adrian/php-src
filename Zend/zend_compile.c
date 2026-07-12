@@ -934,6 +934,13 @@ uint32_t zend_modifier_token_to_flag(zend_modifier_target target, uint32_t token
 				return ZEND_ACC_ABSTRACT;
 			}
 			break;
+		case T_INTERNAL:
+			/* PHP Modules: "internal" method visibility. Public-callable + a marker
+			 * that gates access to same-module code (enforced at method resolution). */
+			if (target == ZEND_MODIFIER_TARGET_METHOD) {
+				return ZEND_ACC_PUBLIC | ZEND_ACC_MODULE_INTERNAL;
+			}
+			break;
 		case T_FINAL:
 			return ZEND_ACC_FINAL;
 		case T_STATIC:
