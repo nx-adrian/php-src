@@ -236,9 +236,36 @@ caller inside the owning module?". The out-of-order standalone include of a
 membership file (loading a sub-file directly before its manifest) uses that
 same prologue and is likewise deferred.
 
-**Deferred to increment 4+:** runtime/handshake internal enforcement (above);
-forward-declaration ("claim") merging + membership sub-files filling claims;
-nested modules; `internal` on *class members* (methods/props); module `static`
-functions/properties + `module::` self-reference; asymmetric-visibility
-interplay; ReflectionModule; `::`-name consumer audit (serialize/var_export);
-`use`-alias resolution of the module segment.
+### Increment 4 (2026-07-07) — runtime internal enforcement. DONE.
+
+Implemented and tested (12 phpt total; no regression across 1382 tests in
+classes/lang/spl/namespaces):
+
+- **Runtime module-access check** in the three runtime class-fetch entry points
+  (`zend_fetch_class_by_name`, `zend_fetch_class`, `zend_fetch_class_with_scope`).
+  After a class resolves, if it is a module's `internal` member, access is
+  denied unless the currently-executing code belongs to the same module —
+  where "current module" is the `<module>::` prefix of the executing function's
+  class scope name (`EG(current_execute_data)` walked to the nearest user
+  frame). Throws `Error` ("Cannot access internal module member ...").
+  Fast-pathed: the check bails immediately for any name without `::`.
+- This closes the increment-3 gap on all three fronts, verified:
+  - internal member reached via **autoload** (module not compile-time known);
+  - **dynamic** `new $string` of an internal member from outside;
+  - while still **allowing** internal access (static or dynamic) from code
+    executing inside the owning module.
+
+So `internal` is now genuinely enforced at both compile time (static
+in-unit references) and runtime (autoloaded / dynamic / cross-file), throwing
+the same `Error` message via either path.
+
+**Deferred to increment 5+:** forward-declaration ("claim") merging +
+membership sub-files filling manifest claims; nested modules; `internal` on
+*class members* (methods/props) as distinct from module top-level members;
+module `static` functions/properties + `module::` self-reference; the
+out-of-order standalone-include handshake (loading a membership sub-file
+directly before its manifest — the autoload path already orders correctly);
+asymmetric-visibility interplay; ReflectionModule; `::`-name consumer audit
+(serialize `O:` strings, var_export); `use`-alias resolution of the module
+segment; module-level constants/functions visibility enforcement (only classes
+are gated so far).
