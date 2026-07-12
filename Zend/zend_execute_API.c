@@ -1821,6 +1821,36 @@ static ZEND_COLD void report_class_fetch_error(const zend_string *class_name, ui
 	} else if ((fetch_type & ZEND_FETCH_CLASS_MASK) == ZEND_FETCH_CLASS_TRAIT) {
 		zend_throw_or_error(fetch_type, NULL, "Trait \"%s\" not found", ZSTR_VAL(class_name));
 	} else {
+		/* PHP Modules: if the missing "Module::Member" names a real module whose Member is
+		 * not a declared member (a typo, or an unclaimed split-file symbol not reachable via
+		 * "::"), say exactly that instead of the generic "Class not found" -- matching the
+		 * cold-path (FETCH_CLASS_CONSTANT) and the compile-time "module::" self-reference
+		 * wording. A *claimed* member whose body merely failed to load IS in the roster, so it
+		 * is left as "Class not found" (a genuine load failure, not a membership problem). */
+		const char *cv = ZSTR_VAL(class_name), *cend = cv + ZSTR_LEN(class_name), *last = NULL;
+		for (const char *p = cv; (p = zend_memnstr(p, "::", 2, cend)) != NULL; p += 2) {
+			last = p;
+		}
+		if (last) {
+			zend_string *mod_lc = zend_string_alloc(last - cv, 0);
+			zend_str_tolower_copy(ZSTR_VAL(mod_lc), cv, last - cv);
+			zend_class_entry *mce = zend_hash_find_ptr(EG(class_table), mod_lc);
+			zend_string_release(mod_lc);
+			if (mce && (mce->ce_flags & ZEND_ACC_MODULE)) {
+				zend_string *member = zend_string_init(last + 2, cend - (last + 2), 0);
+				zend_string *canon = zend_module_member_canonical_name(mce, member);
+				zend_string_release(member);
+				if (canon) {
+					/* it is a declared member -> real load failure; keep "not found" */
+					zend_string_release(canon);
+				} else {
+					zend_throw_or_error(fetch_type, NULL,
+						"\"%s\" is not a member of module \"%s\"",
+						ZSTR_VAL(class_name), ZSTR_VAL(mce->name));
+					return;
+				}
+			}
+		}
 		zend_throw_or_error(fetch_type, NULL, "Class \"%s\" not found", ZSTR_VAL(class_name));
 	}
 }
