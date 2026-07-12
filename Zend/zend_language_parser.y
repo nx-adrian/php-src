@@ -1539,6 +1539,14 @@ module_member:
 	|	member_visibility T_MODULE namespace_declaration_name { RESET_DOC_COMMENT(); } '{' module_member_list '}'
 			{ zend_ast *m = zend_ast_create(ZEND_AST_MODULE, $3, $6);
 			  $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, m); }
+	|	member_visibility namespace_declaration_name ';'
+			{ zend_ast *c = zend_ast_create(ZEND_AST_MODULE_CLAIM, $2);
+			  $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, c); }
+			/* PHP Modules: a body-less "claim" — the definition block forward-declares a
+			 * split-file member by name (and visibility); the body lives in a membership
+			 * file. A qualified name (Auth\PasswordChecker) is permitted, matching a
+			 * sub-file that declares the class under an internal namespace. The member's
+			 * kind (class/interface/…) is taken from the body when it is compiled. */
 ;
 
 /* PHP Modules (experimental): a module-qualified class reference,

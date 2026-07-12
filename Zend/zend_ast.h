@@ -112,6 +112,7 @@ enum _zend_ast_kind {
 	ZEND_AST_CONTINUE,
 	ZEND_AST_PROPERTY_HOOK_SHORT_BODY,
 	ZEND_AST_MODULE_MEMBER, /* PHP Modules: 1 child (the member decl); attr = visibility */
+	ZEND_AST_MODULE_CLAIM,  /* PHP Modules: 1 child (the claimed member name); attr = T_CLASS/T_INTERFACE/T_TRAIT/T_ENUM */
 
 	/* 2 child nodes */
 	ZEND_AST_DIM = 2 << ZEND_AST_NUM_CHILDREN_SHIFT,
