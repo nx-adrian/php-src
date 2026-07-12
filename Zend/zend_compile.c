@@ -3055,10 +3055,11 @@ static zend_string *zend_try_module_chain_class(zend_ast *class_ast) /* {{{ */
 	zend_string *mod_lc = zend_string_alloc(mod_len, 0);
 	zend_str_tolower_copy(ZSTR_VAL(mod_lc), val, mod_len);
 	bool is_module = false;
+	zend_php_module *owner = zend_lookup_module(mod_lc);
 	zend_class_entry *mce = zend_hash_find_ptr(CG(class_table), mod_lc);
 	if (mce && (mce->ce_flags & ZEND_ACC_MODULE)) {
 		is_module = true;
-	} else if (zend_lookup_module(mod_lc)) {
+	} else if (owner) {
 		is_module = true;
 	}
 	zend_string_release(mod_lc);
@@ -3066,6 +3067,26 @@ static zend_string *zend_try_module_chain_class(zend_ast *class_ast) /* {{{ */
 	if (!is_module) {
 		zend_string_release(canonical);
 		return NULL;
+	}
+
+	/* PHP Modules: only reinterpret the chain as a member *class* reference when the
+	 * canonical name is a declared class-like member of its owning module. The compile-
+	 * time roster (owner->members) lists class-like members (and nested modules) but
+	 * deliberately NOT module constants. So when the owner is known and its roster does
+	 * NOT contain this name, the middle segment is a constant: this is a constant-walk
+	 * ("A::CONST::X"), and we leave stock dynamic-class semantics so the constant is
+	 * read at runtime and its string value used as the class name -- matching how the
+	 * same walk resolves from outside the module (and from a "module::" self-reference).
+	 * When the owner is cold/unknown (roster not yet populated), keep the prior behavior
+	 * and reinterpret, so cold-autoload member-class chains still resolve. */
+	if (owner) {
+		zend_string *lc_canonical = zend_string_tolower(canonical);
+		bool is_member = zend_hash_exists(&owner->members, lc_canonical);
+		zend_string_release(lc_canonical);
+		if (!is_member) {
+			zend_string_release(canonical);
+			return NULL;
+		}
 	}
 	return canonical;
 }
