@@ -844,3 +844,21 @@ ns tests green.
 ReflectionModule-exists to backing-class existence; P3 migrate ReflectionModule
 enumeration/visibility to CE data, make the registry compile-time-only, then build with
 preload and verify a preloaded module enforces per request.
+
+## Preload migration P2 (done) — always-create backing class + CE-based tier-1 autoload
+
+- **Every module manifest now materializes a backing class** (`ZEND_ACC_MODULE`), even
+  with no static members. It is the module's runtime identity/presence marker — a
+  persisted class entry, so it survives opcache/preload where the per-request registry
+  does not. Bonus: the shared-symbol rule is now fully bidirectional (a plain `class M`
+  collides with any `module M`, not just modules that happened to have statics).
+- **Tier-1 autoload** ("is module M loaded?") now checks for the backing class
+  (`zend_hash_find_ptr(EG(class_table), mod_lc)` + `ZEND_ACC_MODULE`) instead of
+  `zend_lookup_module`. Preload-safe. module_008 (two-tier autoload) still green.
+
+Non-instantiable / non-extendable behavior unchanged (member-only modules included).
+Test module_028. 30 module + 654 class/autoload/ns/trait/enum + 508 reflection green.
+
+Remaining: P3 — migrate ReflectionModule (getName/getSymbolVisibility/getClasses and
+the construct-time exists check) to CE data (backing CE + member-CE flags + class-table
+scan), make the module registry compile-time-only, then build with preload and verify.

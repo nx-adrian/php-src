@@ -10466,13 +10466,16 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 			FC(current_member_internal) = false;
 		}
 
-		/* Backing class holding the module's static members. Compiled while
-		 * current_module is STILL set, so its method bodies resolve module-relative
-		 * names (bare member classes, module::X). Its own name stays plain ("M", not
-		 * "M::M") because zend_compile_class_decl skips module-prefixing for a
-		 * ZEND_ACC_MODULE decl. The flag also makes it non-instantiable
-		 * ("Cannot instantiate module M") and non-extendable. */
-		if (zend_ast_get_list(backing_stmts)->children > 0) {
+		/* Backing class holding the module's static members. Created for EVERY module
+		 * manifest (even with no static members), because it is also the module's
+		 * runtime identity/presence marker: tier-1 autoload, ReflectionModule, and the
+		 * shared-symbol reservation all key off "does class M (ZEND_ACC_MODULE) exist",
+		 * and — being an ordinary class entry — it persists through opcache/preload,
+		 * which the per-request module registry does not. Compiled while current_module
+		 * is STILL set so member method bodies resolve module-relative names; its own
+		 * name stays plain ("M", not "M::M") via the ZEND_ACC_MODULE prefix-exemption.
+		 * The flag also makes it non-instantiable and non-extendable. */
+		{
 			zend_string *backing_name = zend_string_copy(name);
 			zend_ast *backing = zend_ast_create_decl(ZEND_AST_CLASS,
 				ZEND_ACC_MODULE, ast->lineno, NULL,

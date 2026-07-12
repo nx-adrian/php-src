@@ -1290,8 +1290,11 @@ ZEND_API zend_class_entry *zend_lookup_class_ex(zend_string *name, zend_string *
 			size_t mod_len = sep - ZSTR_VAL(lc_name);
 			zend_string *mod_lc = zend_string_init(ZSTR_VAL(lc_name), mod_len, 0);
 
-			/* Tier 1: ensure the module manifest is loaded. */
-			if (!zend_lookup_module(mod_lc)) {
+			/* Tier 1: ensure the module manifest is loaded. Presence is the module's
+			 * backing class (ZEND_ACC_MODULE) — a persisted class entry, so this works
+			 * for preloaded modules where the per-request registry would be empty. */
+			zend_class_entry *bce = zend_hash_find_ptr(EG(class_table), mod_lc);
+			if (!bce || !(bce->ce_flags & ZEND_ACC_MODULE)) {
 				zend_string *mod_name = zend_string_init(ZSTR_VAL(name), mod_len, 0);
 				zend_autoload(mod_name, mod_lc);
 				zend_string_release_ex(mod_name, 0);
