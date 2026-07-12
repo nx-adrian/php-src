@@ -45,16 +45,14 @@ echo "classes            : ", implode(", ", $r->getClasses()), "\n";
 echo "Invoice visibility : ", $r->getSymbolVisibility("Billing::Invoice"), "\n";
 echo "Ledger visibility  : ", $r->getSymbolVisibility("Billing::Ledger"), "\n";
 
-// NOTE: a *static* reference to an internal member from outside (e.g.
-// `new Billing::Ledger()`) is a COMPILE-time error and is not catchable — that is
-// the compile-time half of the boundary. Here we use dynamic (string) references,
-// which are caught at runtime, so the demo can show the boundary without aborting.
-echo "\n== the boundary (denied from out here; runtime enforcement) ==\n";
+// The boundary is a runtime property, exactly like private/protected: a reference in
+// never-executed code does not error, and enforcement fires only when it actually runs.
+echo "\n== the boundary (denied from out here; enforced at runtime) ==\n";
 $probes = [
-    "instantiate module" => function () { $c = "Billing";          return new $c(); },
-    "internal class"      => function () { $c = "Billing::Ledger";  return new $c(); },
-    "internal constant"   => function () { return constant("Billing::RETRY_LIMIT"); },
-    "internal method"     => function () { $c = "Billing::Ledger";  return $c::record(); },
+    "instantiate module" => fn() => new Billing(),
+    "internal class"      => fn() => new Billing::Ledger(),
+    "internal constant"   => fn() => Billing::RETRY_LIMIT,
+    "internal method"     => fn() => Billing::Ledger::record(),
 ];
 foreach ($probes as $label => $probe) {
     try { $probe(); echo sprintf("%-19s: LEAKED\n", $label); }
