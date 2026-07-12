@@ -1,27 +1,37 @@
 --TEST--
-Modules: "module" remains usable as a member name (semi-reserved); "internal" is a reserved modifier
+Modules: "module" and "internal" are semi-reserved — usable as member names, like public/private
+--DESCRIPTION--
+"internal" is a module visibility modifier, but — exactly like the other visibility words
+(public/private/protected/readonly) — it is only *semi*-reserved: it may still be used as a
+method, constant, or property name. "module" is likewise semi-reserved. Neither is fully
+reserved, so ordinary member-name uses keep compiling; both still function in their keyword
+roles (module declarations / the internal visibility modifier).
 --FILE--
 <?php
-// "module" stays semi-reserved: usable as a method/constant/property name.
 class Registry {
-    const module = 'a constant named module';
-    public function module(): string { return 'a method named module'; }
+    const module = 'const module';
+    const internal = 'const internal';
+    public function module(): string { return 'method module'; }
+    public function internal(): string { return 'method internal'; }
+    public $internal = 'prop internal';
 }
-
 $r = new Registry();
-echo $r->module(), "\n";
-echo Registry::module, "\n";
+echo $r->module(), " / ", $r->internal(), "\n";
+echo Registry::module, " / ", Registry::internal, "\n";
+echo $r->internal, "\n";
 
-// "internal" is a reserved visibility modifier (like public/private), so it is
-// NOT usable as a bare identifier. Confirm that is a parse error.
-try {
-    eval('class K { public function internal() {} }');
-    echo "internal-as-method: no error\n";
-} catch (\ParseError $e) {
-    echo "internal-as-method: ParseError\n";
+// "internal" still works as a module visibility modifier (its keyword role):
+module M {
+    internal class Hidden {}
+    public class Shown {}
 }
+echo (new M::Shown()) instanceof M::Shown ? "Shown ok\n" : "FAIL\n";
+try { new M::Hidden(); echo "LEAK\n"; }
+catch (\Error $e) { echo "Hidden gated\n"; }
 ?>
 --EXPECT--
-a method named module
-a constant named module
-internal-as-method: ParseError
+method module / method internal
+const module / const internal
+prop internal
+Shown ok
+Hidden gated
