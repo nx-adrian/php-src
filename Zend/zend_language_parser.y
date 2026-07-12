@@ -1632,6 +1632,8 @@ module_qualified_name:
 ns_member_ref:
 		class_name T_PAAMAYIM_NEKUDOTAYIM T_NAME_QUALIFIED
 			{ $$ = zend_ast_create_module_qualified_name($1, $3); }
+	|	T_MODULE T_PAAMAYIM_NEKUDOTAYIM T_NAME_QUALIFIED
+			{ $$ = zend_ast_create_module_self_qualified_name($3); }
 	|	ns_member_ref T_PAAMAYIM_NEKUDOTAYIM T_NAME_QUALIFIED
 			{ $$ = zend_ast_create_module_qualified_name($1, $3); }
 ;
