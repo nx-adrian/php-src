@@ -308,6 +308,13 @@ typedef struct _zend_oparray_context {
 #define ZEND_ACC_PROTECTED_SET           (1 << 11) /*     |     |  X  |     */
 #define ZEND_ACC_PRIVATE_SET             (1 << 12) /*     |     |  X  |     */
 /*                                                        |     |     |     */
+/* PHP Modules (experimental): property or class-constant has "internal" module   */
+/* visibility (public at the class level + gated to same-module code). A separate  */
+/* LOW bit from the method flag (ZEND_ACC_MODULE_INTERNAL, bit 30) because property */
+/* and constant flags are carried through the 16-bit compile-time zend_ast->attr;  */
+/* bit 14 is free in both the property and constant contexts.                      */
+#define ZEND_ACC_MODULE_INTERNAL_MEMBER  (1 << 14) /*     |     |  X  |  X  */
+/*                                                        |     |     |     */
 /* Class Flags (unused: 31)                               |     |     |     */
 /* ===========                                            |     |     |     */
 /*                                                        |     |     |     */

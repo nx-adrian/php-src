@@ -902,6 +902,8 @@ static const char *zend_modifier_token_to_string(uint32_t token)
 			return "protected(set)";
 		case T_PRIVATE_SET:
 			return "private(set)";
+		case T_INTERNAL:
+			return "internal";
 		default: ZEND_UNREACHABLE();
 	}
 }
@@ -935,10 +937,15 @@ uint32_t zend_modifier_token_to_flag(zend_modifier_target target, uint32_t token
 			}
 			break;
 		case T_INTERNAL:
-			/* PHP Modules: "internal" method visibility. Public-callable + a marker
-			 * that gates access to same-module code (enforced at method resolution). */
+			/* PHP Modules: "internal" visibility. Public at the class level + a marker
+			 * that gates access to same-module code. Methods use the function-context
+			 * flag (bit 30); properties and constants use the low-bit member flag so it
+			 * survives the 16-bit compile-time attr. */
 			if (target == ZEND_MODIFIER_TARGET_METHOD) {
 				return ZEND_ACC_PUBLIC | ZEND_ACC_MODULE_INTERNAL;
+			}
+			if (target == ZEND_MODIFIER_TARGET_PROPERTY || target == ZEND_MODIFIER_TARGET_CONSTANT) {
+				return ZEND_ACC_PUBLIC | ZEND_ACC_MODULE_INTERNAL_MEMBER;
 			}
 			break;
 		case T_FINAL:
@@ -9391,6 +9398,15 @@ static void zend_compile_class_const_decl(zend_ast *ast, uint32_t flags, zend_as
 	zend_class_entry *ce = CG(active_class_entry);
 	uint32_t i, children = list->children;
 
+	/* PHP Modules: `internal` constants are flag-plumbed (bit 14) but not yet
+	 * enforced — a class constant can be folded at compile time and reached via
+	 * three separate routes, all of which must gate together. Until that gate
+	 * lands, reject rather than expose an unenforced internal constant. */
+	if (UNEXPECTED(flags & ZEND_ACC_MODULE_INTERNAL_MEMBER)) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"internal module constants are not yet supported; declare the constant public");
+	}
+
 	for (i = 0; i < children; ++i) {
 		zend_class_constant *c;
 		zend_ast *const_ast = list->child[i];
@@ -10384,19 +10400,17 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 			 * not global constants. Collect them as class-const groups; they are
 			 * compiled below as part of the backing class, not here. */
 			if (decl->kind == ZEND_AST_CONST_DECL) {
-				/* Module constants become class constants of the backing class.
-				 * `internal` is not yet enforceable here: the visibility can't ride in
-				 * the 16-bit AST attr (ZEND_ACC_MODULE_INTERNAL is bit 31), and const
-				 * fetch would need gating on three routes (compile-time folding, the
-				 * FETCH_CLASS_CONSTANT VM handler, zend_get_class_constant_ex). Rather
-				 * than silently expose an internal constant, reject it for now.
-				 * Internal classes and internal static functions ARE supported. */
+				/* Module constants become class constants of the backing class. An
+				 * `internal` one carries the low-bit member flag (fits the 16-bit attr).
+				 * Enforcement of internal *constants* is still pending (needs the
+				 * three-route fetch gate), so zend_compile_class_const_decl currently
+				 * rejects it — but the flag path is unified with properties here. */
+				uint32_t cflags = ZEND_ACC_PUBLIC;
 				if (visibility == ZEND_MODULE_MEMBER_INTERNAL) {
-					zend_error_noreturn(E_COMPILE_ERROR,
-						"internal module constants are not yet supported; declare the constant public");
+					cflags |= ZEND_ACC_MODULE_INTERNAL_MEMBER;
 				}
 				zend_ast *group = zend_ast_create(ZEND_AST_CLASS_CONST_GROUP, decl, NULL, NULL);
-				group->attr = ZEND_ACC_PUBLIC;
+				group->attr = cflags;
 				backing_stmts = zend_ast_list_add(backing_stmts, group);
 				continue;
 			}
@@ -10414,15 +10428,11 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 			}
 
 			/* Module-level static properties become static properties of the backing
-			 * class. The runtime gate for internal static properties is already in
-			 * place (zend_std_get_static_property_with_info), but the internal flag
-			 * can't ride in the 16-bit prop-group AST attr (ZEND_ACC_MODULE_INTERNAL
-			 * is bit 31), so internal static properties are rejected for now rather
-			 * than exposed unenforced. Public static properties are fully supported. */
+			 * class. An `internal` one carries the low-bit member flag (bit 14, which
+			 * fits the 16-bit prop-group attr), gated in the static-property fetch path. */
 			if (decl->kind == ZEND_AST_PROP_GROUP) {
 				if (visibility == ZEND_MODULE_MEMBER_INTERNAL) {
-					zend_error_noreturn(E_COMPILE_ERROR,
-						"internal module properties are not yet supported; declare the property public");
+					decl->attr |= ZEND_ACC_MODULE_INTERNAL_MEMBER;
 				}
 				backing_stmts = zend_ast_list_add(backing_stmts, decl);
 				continue;
