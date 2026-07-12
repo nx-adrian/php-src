@@ -1233,8 +1233,10 @@ true file-private isolation.
 **Problem.** Top-level split-file members autoloaded fine (tier-1 loads `Shop`, tier-2 loads
 `Shop\User`), but a nested member `Outer::Inner::Gadget` failed: tier-2 transformed only the
 FIRST `::`, yielding `Outer\Inner::Gadget` (still containing `::`), which no autoloader maps.
-Separately, a membership file could not even declare `module Outer::Inner;` — the file-level
-`module` statement only accepted a plain `namespace_declaration_name`.
+The split-file body of a nested member expresses its membership with the intended, `::`-free
+chained membership form `module Outer; module Inner;` (Outer implied — never a literal
+`Outer::Inner`), which the existing nesting logic already supports (each no-block `module X;`
+prefixes the current module).
 
 **Fixes.**
 - `zend_execute_API.c` tier-2: replace EVERY `::` with `\` (copy left-to-right into the private
@@ -1242,8 +1244,10 @@ Separately, a membership file could not even declare `module Outer::Inner;` — 
   still autoloads the outermost segment (`Outer`) — correct, because a nested module's
   definition lives inside its outer module's definition file, so loading `Outer` loads
   `Inner`'s claims too.
-- Grammar: a new file-level statement `T_MODULE module_qualified_name ';'` accepts
-  `module Outer::Inner;` as split-file membership in a nested module. `%expect 0` holds.
+- `zend_compile_module`: chained file-level membership (`module Outer; module Inner;`) leaked
+  the superseded `FC(current_module)` ("Outer"); it is now released when the next membership
+  overwrites it. (An earlier draft added a literal `module Outer::Inner;` statement; removed —
+  the `::` chain is never written in source, `Outer` is always implied by nesting.)
 
 **Verified (module_039):** cold autoload of `Shop::GuestUser` and `Outer::Inner::Gadget`
 (public) resolves through the two tiers; `Shop::Auth\Checker` and `Outer::Inner::Secret`

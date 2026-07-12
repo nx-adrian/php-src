@@ -429,11 +429,6 @@ top_statement:
 	|	T_MODULE namespace_declaration_name ';'
 			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, NULL);
 			  RESET_DOC_COMMENT(); }
-	|	T_MODULE module_qualified_name ';'
-			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, NULL);
-			  RESET_DOC_COMMENT(); }
-			/* PHP Modules: file-level membership in a nested module,
-			 * "module Outer::Inner;" — the canonical "::"-qualified name. */
 	|	T_MODULE namespace_declaration_name { RESET_DOC_COMMENT(); }
 		'{' module_member_list '}'
 			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, $5); }
