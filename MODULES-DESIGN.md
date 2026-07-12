@@ -1225,3 +1225,28 @@ from a sibling inside the module). 39 module + 436 module/ns/class regressions g
 `M::X` unreachable) — the user deprioritized this; kind-mismatch detection (claim says
 interface, body is a class); the keyword'd claim syntax; out-of-order-require reconciliation;
 true file-private isolation.
+
+---
+
+## Increment: cross-file autoload for nested modules (Feature-4 follow-up)
+
+**Problem.** Top-level split-file members autoloaded fine (tier-1 loads `Shop`, tier-2 loads
+`Shop\User`), but a nested member `Outer::Inner::Gadget` failed: tier-2 transformed only the
+FIRST `::`, yielding `Outer\Inner::Gadget` (still containing `::`), which no autoloader maps.
+Separately, a membership file could not even declare `module Outer::Inner;` — the file-level
+`module` statement only accepted a plain `namespace_declaration_name`.
+
+**Fixes.**
+- `zend_execute_API.c` tier-2: replace EVERY `::` with `\` (copy left-to-right into the private
+  buffer; result is never longer), so `Outer::Inner::Gadget` -> `Outer\Inner\Gadget`. Tier-1
+  still autoloads the outermost segment (`Outer`) — correct, because a nested module's
+  definition lives inside its outer module's definition file, so loading `Outer` loads
+  `Inner`'s claims too.
+- Grammar: a new file-level statement `T_MODULE module_qualified_name ';'` accepts
+  `module Outer::Inner;` as split-file membership in a nested module. `%expect 0` holds.
+
+**Verified (module_039):** cold autoload of `Shop::GuestUser` and `Outer::Inner::Gadget`
+(public) resolves through the two tiers; `Shop::Auth\Checker` and `Outer::Inner::Secret`
+(internal, split-file) are denied from outside — the claim's visibility is applied because
+tier-1 loads the definition (claims) before tier-2 loads the body. 40 module + 396 ns/class
+regressions green.

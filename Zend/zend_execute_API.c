@@ -1316,13 +1316,24 @@ ZEND_API zend_class_entry *zend_lookup_class_ex(zend_string *name, zend_string *
 				 * interned buffer, so an in-place transform would corrupt the shared
 				 * "Module::Member" literal. We need a private mutable copy. */
 				if (!zv) {
+					/* Replace EVERY "::" boundary with "\" so a nested member like
+					 * "Outer::Inner::Gadget" maps to the sub-file name "Outer\Inner\Gadget"
+					 * (a single-segment member "Shop::User" becomes "Shop\User"). Copying
+					 * left-to-right into the same private buffer is safe because the result
+					 * is never longer than the source. */
 					zend_string *bs_name = zend_string_init(ZSTR_VAL(name), ZSTR_LEN(name), 0);
-					char *p = ZSTR_VAL(bs_name);
-					char *e = p + ZSTR_LEN(bs_name);
-					for (; p < e - 1; p++) {
-						if (p[0] == ':' && p[1] == ':') { *p = '\\'; memmove(p + 1, p + 2, e - (p + 2)); e--; break; }
+					char *src = ZSTR_VAL(bs_name);
+					char *dst = src;
+					char *e = src + ZSTR_LEN(bs_name);
+					while (src < e) {
+						if (src + 1 < e && src[0] == ':' && src[1] == ':') {
+							*dst++ = '\\';
+							src += 2;
+						} else {
+							*dst++ = *src++;
+						}
 					}
-					bs_name = zend_string_truncate(bs_name, e - ZSTR_VAL(bs_name), 0);
+					bs_name = zend_string_truncate(bs_name, dst - ZSTR_VAL(bs_name), 0);
 					zend_string *bs_lc = zend_string_tolower(bs_name);
 					zend_autoload(bs_name, bs_lc);
 					zend_string_release_ex(bs_name, 0);
