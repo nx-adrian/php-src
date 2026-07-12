@@ -10640,6 +10640,53 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 			"the file (only a leading declare() may precede it)", ZSTR_VAL(raw_name));
 	}
 
+	/* PHP Modules: a membership file ("module M;") owns the file's remaining top-level
+	 * statements, but the module boundary only scopes *class-like* declarations to the
+	 * module. A top-level const, function, variable, or any imperative statement here is
+	 * NOT module-scoped: it silently lands in the global scope (a scope leak — exactly
+	 * what modules exist to prevent). So a membership file is restricted to the forms that
+	 * can be module members or legitimate file headers: class-like declarations (class /
+	 * interface / enum / trait), `use` imports, `declare()`, and nested module / namespace
+	 * blocks. Anything else is a compile error. (Module constants remain available inline
+	 * in the definition block; module-level functions are deferred — see Future Scope.) */
+	if (!stmt_ast) {
+		const zend_ast_list *file_ast = zend_ast_get_list(CG(ast));
+		for (uint32_t i = 0; i < file_ast->children; i++) {
+			const zend_ast *s = file_ast->child[i];
+			if (s == NULL) {
+				continue;
+			}
+			switch (s->kind) {
+				case ZEND_AST_CLASS:       /* class / interface / enum / trait */
+				case ZEND_AST_MODULE:      /* this membership directive + nested module blocks */
+				case ZEND_AST_NAMESPACE:   /* coexisting namespace blocks */
+				case ZEND_AST_USE:
+				case ZEND_AST_GROUP_USE:
+				case ZEND_AST_DECLARE:
+					break;
+				case ZEND_AST_CONST_DECL:
+					zend_error_noreturn(E_COMPILE_ERROR,
+						"A top-level const declaration is not allowed in a module membership "
+						"file (\"module %s;\"): it would not be scoped to the module. Declare "
+						"module constants inline in the module definition block instead",
+						ZSTR_VAL(raw_name));
+					break;
+				case ZEND_AST_FUNC_DECL:
+					zend_error_noreturn(E_COMPILE_ERROR,
+						"A function declaration is not allowed in a module membership file "
+						"(\"module %s;\"): it would not be scoped to the module",
+						ZSTR_VAL(raw_name));
+					break;
+				default:
+					zend_error_noreturn(E_COMPILE_ERROR,
+						"Only class-like declarations (class, interface, enum, trait), use "
+						"imports, and declare()/namespace/nested-module blocks are allowed in a "
+						"module membership file (\"module %s;\"); other statements would run in "
+						"the global scope rather than the module", ZSTR_VAL(raw_name));
+			}
+		}
+	}
+
 	zend_string *name;                                 /* owned; released at function end */
 	if (parent_module) {
 		name = zend_string_concat3(
