@@ -10675,6 +10675,12 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 		/* Restore the enclosing module scope (NULL at top level; the parent's
 		 * canonical name when this was a nested module). */
 		FC(current_module) = parent_module;
+	} else if (parent_module) {
+		/* A membership declaration (no block, `module Foo;`) leaves current_module set
+		 * for the rest of the file. When one supersedes another via chained membership
+		 * ("module Outer; module Inner;"), the prior current_module — captured in
+		 * parent_module before we overwrote it — is now orphaned; release it. */
+		zend_string_release(parent_module);
 	}
 	/* A membership declaration (no block, `module Foo;`) leaves current_module set
 	 * for the remainder of the file so subsequent declarations are module-owned; its
