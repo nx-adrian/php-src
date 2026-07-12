@@ -259,7 +259,45 @@ So `internal` is now genuinely enforced at both compile time (static
 in-unit references) and runtime (autoloaded / dynamic / cross-file), throwing
 the same `Error` message via either path.
 
-**Deferred to increment 5+:** forward-declaration ("claim") merging +
+### Increment 5 (2026-07-07) — `internal` class methods. DONE.
+
+Implemented and tested (13 phpt; no regression across ~2700 tests in
+classes/traits/methods/access_modifiers/spl/lang/namespaces — the hot
+method-dispatch path):
+
+- **`internal` as a method visibility modifier** (`member_modifier`), a new
+  fn_flag `ZEND_ACC_MODULE_INTERNAL` (function bit 31) stored alongside
+  `ZEND_ACC_PUBLIC` (so normal dispatch treats the method as callable) plus the
+  marker. Only valid on methods for now.
+- **Enforcement** in both method resolvers (`zend_std_get_method`,
+  `zend_std_get_static_method`): an internal method is callable only from code
+  whose class scope shares the method's module (`<module>::` prefix); otherwise
+  `Error` ("Cannot call internal method X::y() from outside its module").
+  Guarded by the (rare) marker flag with `UNEXPECTED`, so the hot path pays only
+  one flag test. Verified against the RFC's OrderManagement/InventoryEngine
+  example: a sibling class in the module calls `reserveStock()` fine; the same
+  call from global scope is denied.
+
+**Grammar-conflict finding (design note):** adding `internal` to
+`member_modifier` while it was also in `reserved_non_modifiers` produced a
+reduce/reduce conflict in trait aliasing (`A::foo as internal` — is `internal`
+a rename target or a visibility?). This is inherent: a token cannot be both a
+visibility modifier and a free identifier in LALR(1). Resolved by making
+`internal` a fully reserved keyword (removed from `reserved_non_modifiers`),
+exactly like `public`/`private`. So `internal` is no longer usable as a
+method/const/identifier name (a BC break — the same class as `match`). `module`
+remains semi-reserved (no such conflict) and is still usable as a member name.
+This refutes the RFC's hope that `internal` could stay unreserved "allowed only
+where visibility modifiers are parsed" — the trait-alias grammar forces a
+choice. Worth stating explicitly in any real RFC.
+
+**Scope note:** `internal` is implemented for methods (the RFC's headline
+class-member example). Internal *properties* and *class constants*, and
+reaching an internal *static* method via the chained `A::B::C()` syntax (that
+chained form is itself deferred — see the spike), are not yet done. Static
+internal enforcement works when the class is reached dynamically.
+
+**Deferred to increment 6+:** forward-declaration ("claim") merging +
 membership sub-files filling manifest claims; nested modules; `internal` on
 *class members* (methods/props) as distinct from module top-level members;
 module `static` functions/properties + `module::` self-reference; the

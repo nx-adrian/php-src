@@ -430,6 +430,11 @@ typedef struct _zend_oparray_context {
 /* has #[\NoDiscard] attribute                            |     |     |     */
 #define ZEND_ACC_NODISCARD               (1 << 29) /*     |  X  |     |     */
 /*                                                        |     |     |     */
+/* PHP Modules (experimental): method has "internal" visibility — callable      */
+/* from any code inside the same module, denied from outside. Stored alongside  */
+/* ZEND_ACC_PUBLIC (so normal dispatch treats it as callable) plus this marker. */
+#define ZEND_ACC_MODULE_INTERNAL         (1u << 31) /*    |  X  |     |     */
+/*                                                        |     |     |     */
 /* op_array uses strict mode types                        |     |     |     */
 #define ZEND_ACC_STRICT_TYPES            (1U << 31) /*    |  X  |     |     */
 /*                                                        |     |     |     */

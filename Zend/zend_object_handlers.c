@@ -1938,6 +1938,36 @@ ZEND_API ZEND_COLD zend_never_inline void zend_abstract_method_call(const zend_f
 }
 /* }}} */
 
+/* PHP Modules: does the caller (scope) belong to the same module as a class that
+ * declares an "internal" method? The module is the "<module>::" prefix of the
+ * class name; a caller with no module, or a different module, is denied. */
+static zend_always_inline bool zend_module_scope_allows(
+		const zend_class_entry *member_ce, const zend_class_entry *scope)
+{
+	const char *mval = ZSTR_VAL(member_ce->name);
+	const char *msep = zend_memnstr(mval, "::", 2, mval + ZSTR_LEN(member_ce->name));
+	if (!msep) {
+		return true; /* declaring class is not in a module — nothing to gate */
+	}
+	if (!scope) {
+		return false;
+	}
+	size_t mlen = (size_t)(msep - mval);
+	const char *sval = ZSTR_VAL(scope->name);
+	const char *ssep = zend_memnstr(sval, "::", 2, sval + ZSTR_LEN(scope->name));
+	if (!ssep || (size_t)(ssep - sval) != mlen) {
+		return false;
+	}
+	return zend_binary_strncasecmp(sval, mlen, mval, mlen, mlen) == 0;
+}
+
+static ZEND_COLD void zend_bad_module_method_call(const zend_function *fbc)
+{
+	zend_throw_error(NULL,
+		"Cannot call internal method %s::%s() from outside its module",
+		ZSTR_VAL(fbc->common.scope->name), ZSTR_VAL(fbc->common.function_name));
+}
+
 ZEND_API zend_function *zend_std_get_method(zend_object **obj_ptr, zend_string *method_name, const zval *key) /* {{{ */
 {
 	zend_object *zobj = *obj_ptr;
@@ -1968,6 +1998,20 @@ ZEND_API zend_function *zend_std_get_method(zend_object **obj_ptr, zend_string *
 	}
 
 	fbc = Z_FUNC_P(func);
+
+	/* PHP Modules: gate an "internal" method to same-module callers. */
+	if (UNEXPECTED(fbc->common.fn_flags & ZEND_ACC_MODULE_INTERNAL)) {
+		const zend_class_entry *scope = zend_get_executed_scope();
+		if (!zend_module_scope_allows(fbc->common.scope, scope)) {
+			if (zobj->ce->__call) {
+				fbc = zend_get_call_trampoline_func(zobj->ce->__call, method_name);
+			} else {
+				zend_bad_module_method_call(fbc);
+				fbc = NULL;
+			}
+			goto exit;
+		}
+	}
 
 	/* Check access level */
 	if (fbc->op_array.fn_flags & (ZEND_ACC_CHANGED|ZEND_ACC_PRIVATE|ZEND_ACC_PROTECTED)) {
@@ -2040,6 +2084,18 @@ ZEND_API zend_function *zend_std_get_static_method(const zend_class_entry *ce, z
 	zval *func = zend_hash_find(&ce->function_table, lc_function_name);
 	if (EXPECTED(func)) {
 		fbc = Z_FUNC_P(func);
+		/* PHP Modules: gate an "internal" static method to same-module callers. */
+		if (UNEXPECTED(fbc->common.fn_flags & ZEND_ACC_MODULE_INTERNAL)) {
+			const zend_class_entry *scope = zend_get_executed_scope();
+			if (!zend_module_scope_allows(fbc->common.scope, scope)) {
+				zend_function *fallback_fbc = get_static_method_fallback(ce, function_name);
+				if (!fallback_fbc) {
+					zend_bad_module_method_call(fbc);
+				}
+				fbc = fallback_fbc;
+				goto module_checked;
+			}
+		}
 		if (!(fbc->common.fn_flags & ZEND_ACC_PUBLIC)) {
 			const zend_class_entry *scope = zend_get_executed_scope();
 			ZEND_ASSERT(!(fbc->common.fn_flags & ZEND_ACC_PUBLIC));
@@ -2051,6 +2107,7 @@ ZEND_API zend_function *zend_std_get_static_method(const zend_class_entry *ce, z
 				fbc = fallback_fbc;
 			}
 		}
+module_checked: ;
 	} else {
 		fbc = get_static_method_fallback(ce, function_name);
 	}
