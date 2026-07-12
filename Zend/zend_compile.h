@@ -151,6 +151,7 @@ typedef struct _zend_php_module {
 
 ZEND_API zend_php_module *zend_register_module(zend_string *name);
 ZEND_API zend_php_module *zend_lookup_module(zend_string *lc_name);
+ZEND_API zend_ast *zend_ast_create_module_qualified_name(zend_ast *module_ast, zend_ast *member_ast);
 
 typedef int (*user_opcode_handler_t) (zend_execute_data *execute_data);
 

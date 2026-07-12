@@ -1183,6 +1183,8 @@ static zend_string *zend_resolve_const_name(zend_string *name, uint32_t type, bo
 		name, type, is_fully_qualified, true, FC(imports_const));
 }
 
+static bool zend_module_member_is_hidden(zend_string *lc_class_name);
+
 static zend_string *zend_resolve_class_name(zend_string *name, uint32_t type) /* {{{ */
 {
 	const char *compound;
@@ -1214,6 +1216,18 @@ static zend_string *zend_resolve_class_name(zend_string *name, uint32_t type) /*
 			}
 			return name;
 		}
+
+		/* PHP Modules: reject a static reference to a module's internal member from
+		 * outside the module boundary. (Dynamic and cross-file runtime references
+		 * are gated by the runtime membership check in a later increment.) */
+		zend_string *lc = zend_string_tolower(name);
+		if (zend_module_member_is_hidden(lc)) {
+			zend_string *dup = zend_string_copy(name);
+			zend_string_release(lc);
+			zend_error_noreturn(E_COMPILE_ERROR,
+				"Cannot access internal module member \"%s\" from outside its module", ZSTR_VAL(dup));
+		}
+		zend_string_release(lc);
 
 		return zend_string_copy(name);
 	}
@@ -10189,6 +10203,26 @@ ZEND_API zend_php_module *zend_register_module(zend_string *name) {
 	return mod;
 }
 
+/* Build a canonical module-qualified name AST ("Module::Member") from two name
+ * ASTs. Marked fully-qualified so class resolution looks it up verbatim (as the
+ * canonical class-table key), bypassing namespace prefixing and use-imports.
+ * (use-alias resolution of the module segment is a later increment.) */
+ZEND_API zend_ast *zend_ast_create_module_qualified_name(zend_ast *module_ast, zend_ast *member_ast) /* {{{ */
+{
+	zend_string *m = zend_ast_get_str(module_ast);
+	zend_string *n = zend_ast_get_str(member_ast);
+	zend_string *combined = zend_string_concat3(ZSTR_VAL(m), ZSTR_LEN(m), "::", 2, ZSTR_VAL(n), ZSTR_LEN(n));
+	zval zv;
+	ZVAL_STR(&zv, combined);
+	zend_ast *result = zend_ast_create_zval_ex(&zv, ZEND_NAME_FQ);
+	/* Release the now-unreferenced child name nodes' strings (arena frees the
+	 * node memory; we must release the zvals they hold). */
+	zend_ast_destroy(module_ast);
+	zend_ast_destroy(member_ast);
+	return result;
+}
+/* }}} */
+
 static void zend_compile_module(const zend_ast *ast) /* {{{ */
 {
 	zend_ast *name_ast = ast->child[0];
@@ -10213,18 +10247,69 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 	}
 	zend_string_release(lc_name);
 
-	zend_register_module(name);
+	zend_php_module *mod = zend_register_module(name);
 
 	FC(current_module) = zend_string_copy(name);
 
 	if (stmt_ast) {
-		/* Manifest block: compile the owned declarations under the module prefix. */
-		zend_compile_top_stmt(stmt_ast);
+		/* Manifest block: a list of ZEND_AST_MODULE_MEMBER wrappers, each carrying
+		 * the member's visibility in ->attr and the real declaration as child[0]. */
+		const zend_ast_list *members = zend_ast_get_list(stmt_ast);
+		for (uint32_t i = 0; i < members->children; i++) {
+			zend_ast *member = members->child[i];
+			ZEND_ASSERT(member->kind == ZEND_AST_MODULE_MEMBER);
+			uint32_t visibility = member->attr;
+			zend_ast *decl = member->child[0];
+
+			/* Record the member's canonical name -> visibility before compiling, so
+			 * self-referential internal access within the manifest resolves. */
+			if (zend_ast_is_decl(decl)) {
+				zend_string *simple = ((zend_ast_decl *) decl)->name;
+				if (simple) {
+					zend_string *canonical = zend_string_concat3(
+						ZSTR_VAL(name), ZSTR_LEN(name), "::", 2,
+						ZSTR_VAL(simple), ZSTR_LEN(simple));
+					zend_string *lc = zend_string_tolower(canonical);
+					zend_hash_update_ptr(&mod->members, lc, (void*)(uintptr_t) visibility);
+					zend_string_release(canonical);
+					zend_string_release(lc);
+				}
+			}
+
+			zend_compile_top_stmt(decl);
+		}
 		zend_string_release(FC(current_module));
 		FC(current_module) = NULL;
 	}
 	/* A membership declaration (no block, `module Foo;`) leaves current_module set
 	 * for the remainder of the file so subsequent declarations are module-owned. */
+}
+/* }}} */
+
+/* PHP Modules: is the given canonical (lc) class name an internal member of a
+ * module OTHER than the one currently being compiled? Used to gate references. */
+static bool zend_module_member_is_hidden(zend_string *lc_class_name) /* {{{ */
+{
+	const char *sep = zend_memnstr(ZSTR_VAL(lc_class_name), "::", 2,
+		ZSTR_VAL(lc_class_name) + ZSTR_LEN(lc_class_name));
+	if (!sep) {
+		return false; /* not a module-qualified name */
+	}
+	size_t mod_len = sep - ZSTR_VAL(lc_class_name);
+	zend_string *mod_lc = zend_string_init(ZSTR_VAL(lc_class_name), mod_len, 0);
+
+	zend_php_module *mod = zend_lookup_module(mod_lc);
+	bool hidden = false;
+	if (mod) {
+		void *vis = zend_hash_find_ptr(&mod->members, lc_class_name);
+		if (vis && (uintptr_t) vis == ZEND_MODULE_MEMBER_INTERNAL) {
+			/* Hidden unless we are compiling inside the owning module. */
+			hidden = !(FC(current_module)
+				&& zend_string_equals_ci(FC(current_module), mod->name));
+		}
+	}
+	zend_string_release(mod_lc);
+	return hidden;
 }
 /* }}} */
 
