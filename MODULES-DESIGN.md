@@ -862,3 +862,33 @@ Test module_028. 30 module + 654 class/autoload/ns/trait/enum + 508 reflection g
 Remaining: P3 — migrate ReflectionModule (getName/getSymbolVisibility/getClasses and
 the construct-time exists check) to CE data (backing CE + member-CE flags + class-table
 scan), make the module registry compile-time-only, then build with preload and verify.
+
+## Preload migration P3 (done) — reflection to CE data + optimizer gate + preload verified
+
+- **ReflectionModule migrated off the registry** to the backing class entry:
+  construct/getName use the `ZEND_ACC_MODULE` CE; getClasses enumerates class-table
+  keys `Module::Name` (skipping RTD keys and nested chains); getSymbolVisibility reads
+  the member CE's `ZEND_ACC2_MODULE_INTERNAL`. Registry-free → works under preload.
+- **Fourth const route found and gated (opcache optimizer).** The preload test leaked
+  an internal constant: opcache's optimizer (`zend_fetch_class_const_info`) folds a
+  const's value into other op_arrays and only refused non-public consts — an internal
+  const is public+marker, so it folded, bypassing the runtime gate (visible only when
+  the const's class is preloaded/immutable and the referencing file is optimized).
+  Added the `ZEND_ACC_MODULE_INTERNAL_MEMBER` + `zend_module_scope_allows` refusal
+  there. (So internal-const enforcement now spans FOUR routes: compile fold, optimizer
+  fold, VM handler, and zend_get_class_constant_ex.)
+- **Preload verified end-to-end** (`module_029_preload.phpt`): a preloaded module whose
+  file is never required by the request — so `ZEND_DECLARE_MODULE` never runs and the
+  per-request registry is empty — still enforces internal on classes AND constants,
+  and ReflectionModule works. This is the definitive proof the runtime is registry-free.
+- Test hygiene: the opcache-file-cache tests (015/020) now clean their temp dirs
+  recursively (opcache mirrors the full absolute source path, so the old fixed-depth
+  glob left stale bytecode).
+
+**Preload persistence is solved.** Every runtime consumer (object-handler gates,
+class-fetch enforcement, tier-1 autoload, constants across all four routes,
+ReflectionModule) reads CE-resident data; the module registry is now used only at
+compile time. The `ZEND_DECLARE_MODULE` opcode + per-request registry rebuild are no
+longer read at runtime and could be removed as a later cleanup (left in as a harmless
+compile-time/non-preload convenience for now). 31 module + reflection/optimizer/const
+suites green.

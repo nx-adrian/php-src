@@ -37,14 +37,16 @@ echo "run2: ", trim(shell_exec($cmd)), "\n";
 ?>
 --CLEAN--
 <?php
-$dir = __DIR__ . '/oc_const_tmp';
-foreach (glob($dir . '/cache/*/*/*') as $f) @unlink($f);
-foreach (glob($dir . '/cache/*/*') as $d) @rmdir($d);
-foreach (glob($dir . '/cache/*') as $d) @rmdir($d);
-@rmdir($dir . '/cache');
-@unlink($dir . '/mod.inc');
-@unlink($dir . '/consumer.php');
-@rmdir($dir);
+function rrmdir(string $d): void {
+    if (!file_exists($d)) return;
+    if (!is_dir($d)) { @unlink($d); return; }
+    foreach (scandir($d) as $f) {
+        if ($f === '.' || $f === '..') continue;
+        rrmdir($d . '/' . $f);
+    }
+    @rmdir($d);
+}
+rrmdir(__DIR__ . '/oc_const_tmp');
 ?>
 --EXPECT--
 run1: 1.2.3
