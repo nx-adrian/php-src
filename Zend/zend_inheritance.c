@@ -1862,6 +1862,18 @@ ZEND_API void zend_do_inheritance_ex(zend_class_entry *ce, zend_class_entry *par
 		}
 	}
 
+	/* PHP Modules: a class outside a module may not extend an `internal` class of that
+	 * module. An internal class is an ordinary class carrying ZEND_ACC2_MODULE_INTERNAL,
+	 * so this check sits here at the shared linking site — reached by both runtime and
+	 * *early* (compile-time) binding, closing the hole where an early-bound subclass would
+	 * otherwise skip the runtime class-fetch gate. */
+	if (UNEXPECTED(parent_ce->ce_flags2 & ZEND_ACC2_MODULE_INTERNAL)
+	 && !zend_module_scope_allows(parent_ce, ce)) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"Cannot access internal module member \"%s\" from outside its module",
+			ZSTR_VAL(parent_ce->name));
+	}
+
 	if (UNEXPECTED((ce->ce_flags & ZEND_ACC_READONLY_CLASS) != (parent_ce->ce_flags & ZEND_ACC_READONLY_CLASS))) {
 		zend_error_noreturn(E_COMPILE_ERROR, "%s class %s cannot extend %s class %s",
 			ce->ce_flags & ZEND_ACC_READONLY_CLASS ? "Readonly" : "Non-readonly", ZSTR_VAL(ce->name),

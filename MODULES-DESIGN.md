@@ -1361,3 +1361,35 @@ internal denied outside; chained membership blocked. 43 module + 156 module/ns t
 Outer::Priv" rather than a clean internal-access `Error` — the chain reinterpretation appears
 to bail before the visibility gate. Class instantiation of an internal nested member IS denied
 cleanly; only this static-call-from-outside path mis-reports. Follow-up.
+
+---
+
+## Re-audit fixes: extends/implements-internal enforcement + implements grammar
+
+Re-audit of PoC↔RFC surfaced two real bugs (fixed) and two known deferrals (RFC reconciled).
+
+**Bug 1 — early-bound `extends internal-class` bypassed the boundary.** Runtime class binding
+fetches the parent via the gated `zend_fetch_class_by_name` (→ catchable Error), but *early*
+binding calls `zend_do_inheritance_ex` directly with an already-resolved parent, skipping that
+gate — so a top-level `class X extends \Mod::InternalBase {}` from outside silently succeeded.
+Fixed by adding the internal gate at the shared linking site (`zend_do_inheritance_ex`, beside
+the `final`/`enum`/`module` checks): if the parent carries `ZEND_ACC2_MODULE_INTERNAL` and
+`!zend_module_scope_allows(parent, ce)`, `E_COMPILE_ERROR`. Early-bound → `E_COMPILE_ERROR`
+(fatal, like `extends final`); runtime-bound stays a catchable Error via the fetch gate — the
+asymmetry mirrors PHP's own early/runtime binding differences and is consumer-side, not a
+malformed module.
+
+**Bug 2 — `implements Module::Interface` did not parse.** `implements`/interface-extends use
+`class_name_list`, never extended to accept `::` names (unlike `extends`/`new`/type-hints).
+Added `module_qualified_name` to `class_name_list` (conflict-free, `%expect 0`) — which also
+enables `use \Mod::Trait;` in a class. Enforcement of `implements`-internal came for free (the
+interface is fetched through the gated path → catchable Error).
+
+**RFC reconciled for two deferrals:** `internal(set)` asymmetric visibility (investigated,
+cross-cutting — moved to Future Scope, section reframed to property-hook composition only);
+and unclaimed-symbol reachability (RFC line 145 softened — gating unclaimed symbols is an open
+Undecided/Future question, not a current guarantee).
+
+**Verified:** module_042 (public extends/implements/trait ok; internal extends & implements
+denied incl. early binding; extends-internal-from-inside ok). 44 module + 546 trait/class/iface
++ 714 inheritance/enum regressions green.
