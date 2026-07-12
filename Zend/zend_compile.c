@@ -2952,46 +2952,78 @@ static inline void zend_set_class_name_op1(zend_op *opline, znode *class_node) /
  * constant. Returns the canonical class name (owned) to use as the class, or NULL to
  * leave the operand as-is (preserving stock "Class::CONST::…" dynamic-class semantics
  * and cross-file cases). */
+/* Build the canonical "::"-joined name of an all-bareword class-const chain
+ * (A::B, A::B::C, …), resolving only the leftmost (root) segment as a class name
+ * (module/namespace aware). Returns an owned string, or NULL if the node is not such
+ * a chain (e.g. a dynamic/variable class, or a non-bareword segment). */
+static zend_string *zend_module_chain_canonical(zend_ast *node) /* {{{ */
+{
+	if (node->kind == ZEND_AST_ZVAL) {
+		zval *zv = zend_ast_get_zval(node);
+		if (Z_TYPE_P(zv) != IS_STRING
+		 || zend_get_class_fetch_type(Z_STR_P(zv)) != ZEND_FETCH_CLASS_DEFAULT) {
+			return NULL;
+		}
+		return zend_resolve_class_name(Z_STR_P(zv), node->attr);
+	}
+	if (node->kind == ZEND_AST_CLASS_CONST) {
+		zend_ast *seg_ast = node->child[1];
+		if (seg_ast->kind != ZEND_AST_ZVAL || Z_TYPE_P(zend_ast_get_zval(seg_ast)) != IS_STRING) {
+			return NULL;
+		}
+		zend_string *left = zend_module_chain_canonical(node->child[0]);
+		if (!left) {
+			return NULL;
+		}
+		zend_string *seg = Z_STR_P(zend_ast_get_zval(seg_ast));
+		zend_string *res = zend_string_concat3(
+			ZSTR_VAL(left), ZSTR_LEN(left), "::", 2, ZSTR_VAL(seg), ZSTR_LEN(seg));
+		zend_string_release(left);
+		return res;
+	}
+	return NULL;
+}
+/* }}} */
+
 static zend_string *zend_try_module_chain_class(zend_ast *class_ast) /* {{{ */
 {
+	/* The class operand is a class-const chain of 2+ segments (A::B, A::B::C, …). */
 	if (class_ast->kind != ZEND_AST_CLASS_CONST) {
 		return NULL;
 	}
-	zend_ast *lead_ast = class_ast->child[0];
-	zend_ast *member_ast = class_ast->child[1];
-	if (lead_ast->kind != ZEND_AST_ZVAL || member_ast->kind != ZEND_AST_ZVAL) {
+	zend_string *canonical = zend_module_chain_canonical(class_ast);
+	if (!canonical) {
 		return NULL;
 	}
-	zval *lead_zv = zend_ast_get_zval(lead_ast);
-	zval *member_zv = zend_ast_get_zval(member_ast);
-	if (Z_TYPE_P(lead_zv) != IS_STRING || Z_TYPE_P(member_zv) != IS_STRING
-	 || zend_get_class_fetch_type(Z_STR_P(lead_zv)) != ZEND_FETCH_CLASS_DEFAULT) {
+	/* This names member class "<module>::<Name>"; its module is everything before the
+	 * last "::" (handles nested modules: "X::Y::Service" -> module "X::Y"). Reinterpret
+	 * only if that module is genuinely a module (backing class visible or registered),
+	 * otherwise leave stock "Class::CONST::…" dynamic-class semantics untouched. */
+	const char *val = ZSTR_VAL(canonical);
+	const char *last_sep = NULL;
+	for (const char *p = val; (p = strstr(p, "::")) != NULL; p += 2) {
+		last_sep = p;
+	}
+	if (!last_sep) {
+		zend_string_release(canonical);
 		return NULL;
 	}
-	/* Resolve the leading segment as a class name (module/namespace aware). */
-	zend_string *lead = zend_resolve_class_name(Z_STR_P(lead_zv), lead_ast->attr);
-
-	/* Reinterpret only when the leading segment is genuinely a module — either its
-	 * backing class is visible (preloaded / same file, ZEND_ACC_MODULE) or the module
-	 * is registered this compilation. Otherwise leave stock semantics untouched. */
-	zend_string *lead_lc = zend_string_tolower(lead);
+	size_t mod_len = (size_t)(last_sep - val);
+	zend_string *mod_lc = zend_string_alloc(mod_len, 0);
+	zend_str_tolower_copy(ZSTR_VAL(mod_lc), val, mod_len);
 	bool is_module = false;
-	zend_class_entry *lce = zend_hash_find_ptr(CG(class_table), lead_lc);
-	if (lce && (lce->ce_flags & ZEND_ACC_MODULE)) {
+	zend_class_entry *mce = zend_hash_find_ptr(CG(class_table), mod_lc);
+	if (mce && (mce->ce_flags & ZEND_ACC_MODULE)) {
 		is_module = true;
-	} else if (zend_lookup_module(lead_lc)) {
+	} else if (zend_lookup_module(mod_lc)) {
 		is_module = true;
 	}
-	zend_string_release(lead_lc);
+	zend_string_release(mod_lc);
 
 	if (!is_module) {
-		zend_string_release(lead);
+		zend_string_release(canonical);
 		return NULL;
 	}
-	zend_string *canonical = zend_string_concat3(
-		ZSTR_VAL(lead), ZSTR_LEN(lead), "::", 2,
-		ZSTR_VAL(Z_STR_P(member_zv)), ZSTR_LEN(Z_STR_P(member_zv)));
-	zend_string_release(lead);
 	return canonical;
 }
 /* }}} */
@@ -10401,15 +10433,27 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 {
 	zend_ast *name_ast = ast->child[0];
 	zend_ast *stmt_ast = ast->child[1];
-	zend_string *name = zend_ast_get_str(name_ast);
+	zend_string *raw_name = zend_ast_get_str(name_ast);
 
 	/* Module manifests and membership declarations live in the root namespace. */
 	if (FC(current_namespace)) {
 		zend_error_noreturn(E_COMPILE_ERROR,
-			"Module declaration \"%s\" must be in the root namespace", ZSTR_VAL(name));
+			"Module declaration \"%s\" must be in the root namespace", ZSTR_VAL(raw_name));
 	}
-	if (FC(current_module)) {
-		zend_error_noreturn(E_COMPILE_ERROR, "Module declarations cannot be nested");
+
+	/* Nested modules (flat boundary model): a module declared inside another is
+	 * canonically named "Outer::Inner"; members become "Outer::Inner::member". Nesting
+	 * is only a naming boundary — it grants no access relationship between inner and
+	 * outer. The enclosing module scope is saved and restored around the nested block
+	 * so declarations after it stay owned by the outer module. */
+	zend_string *parent_module = FC(current_module);   /* borrowed; NULL at top level */
+	zend_string *name;                                 /* owned; released at function end */
+	if (parent_module) {
+		name = zend_string_concat3(
+			ZSTR_VAL(parent_module), ZSTR_LEN(parent_module), "::", 2,
+			ZSTR_VAL(raw_name), ZSTR_LEN(raw_name));
+	} else {
+		name = zend_string_copy(raw_name);
 	}
 
 	/* Shared symbol space: a module name may not collide with an existing class.
@@ -10536,7 +10580,9 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 		}
 
 		zend_string_release(FC(current_module));
-		FC(current_module) = NULL;
+		/* Restore the enclosing module scope (NULL at top level; the parent's
+		 * canonical name when this was a nested module). */
+		FC(current_module) = parent_module;
 	}
 	/* A membership declaration (no block, `module Foo;`) leaves current_module set
 	 * for the remainder of the file so subsequent declarations are module-owned; its
@@ -10551,6 +10597,8 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 	roster_node.op_type = IS_CONST;
 	ZVAL_ARR(&roster_node.u.constant, roster);
 	zend_emit_op(NULL, ZEND_DECLARE_MODULE, &name_node, &roster_node);
+
+	zend_string_release(name);
 }
 /* }}} */
 

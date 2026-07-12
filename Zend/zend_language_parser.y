@@ -1530,6 +1530,9 @@ module_member:
 			{ zend_ast *p = zend_ast_create(ZEND_AST_PROP_GROUP, $3, $4, NULL);
 			  p->attr = ZEND_ACC_PUBLIC | ZEND_ACC_STATIC;
 			  $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, p); }
+	|	member_visibility T_MODULE namespace_declaration_name { RESET_DOC_COMMENT(); } '{' module_member_list '}'
+			{ zend_ast *m = zend_ast_create(ZEND_AST_MODULE, $3, $6);
+			  $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, m); }
 ;
 
 /* PHP Modules (experimental): a module-qualified class reference,
