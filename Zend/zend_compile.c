@@ -10597,6 +10597,46 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 		/* Manifest block: a list of ZEND_AST_MODULE_MEMBER wrappers, each carrying
 		 * the member's visibility in ->attr and the real declaration as child[0]. */
 		const zend_ast_list *members = zend_ast_get_list(stmt_ast);
+
+		/* Pre-pass: register every member's canonical name -> visibility BEFORE any
+		 * member body is compiled, so a "module::Member" self-reference resolves
+		 * regardless of declaration order within the block. Without this, a member
+		 * body could only see members declared textually before it (no forward
+		 * references). The set registered here mirrors exactly what the main loop
+		 * below records; static const/func/prop live in the backing class and are
+		 * not module members, so they are skipped. Re-registration in the main loop
+		 * is idempotent (same key -> same visibility). */
+		for (uint32_t i = 0; i < members->children; i++) {
+			zend_ast *member = members->child[i];
+			ZEND_ASSERT(member->kind == ZEND_AST_MODULE_MEMBER);
+			uint32_t pv = member->attr;
+			zend_ast *pdecl = member->child[0];
+			zend_string *psimple = NULL;
+
+			if (pdecl->kind == ZEND_AST_MODULE_CLAIM
+			 || (pdecl->kind == ZEND_AST_MODULE && pdecl->child[1] == NULL)) {
+				psimple = zend_ast_get_str(pdecl->child[0]);
+			} else if (pdecl->kind == ZEND_AST_CONST_DECL
+					|| pdecl->kind == ZEND_AST_METHOD
+					|| pdecl->kind == ZEND_AST_PROP_GROUP) {
+				continue;
+			} else if (zend_ast_is_decl(pdecl)) {
+				psimple = ((zend_ast_decl *) pdecl)->name;
+			}
+			if (!psimple) {
+				continue;
+			}
+			zend_string *pcanon = zend_string_concat3(
+				ZSTR_VAL(name), ZSTR_LEN(name), "::", 2, ZSTR_VAL(psimple), ZSTR_LEN(psimple));
+			zend_string *plc = zend_string_tolower(pcanon);
+			zend_hash_update_ptr(&mod->members, plc, (void*)(uintptr_t) pv);
+			zval pvzv;
+			ZVAL_LONG(&pvzv, (zend_long) pv);
+			zend_hash_update(roster, plc, &pvzv);
+			zend_string_release(pcanon);
+			zend_string_release(plc);
+		}
+
 		for (uint32_t i = 0; i < members->children; i++) {
 			zend_ast *member = members->child[i];
 			ZEND_ASSERT(member->kind == ZEND_AST_MODULE_MEMBER);
