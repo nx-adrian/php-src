@@ -9817,9 +9817,11 @@ static void zend_compile_class_decl(znode *result, const zend_ast *ast, bool top
 	}
 
 	ce->ce_flags |= decl->flags;
-	/* PHP Modules: mark an internal member class (CE-resident internal-ness). Not the
-	 * backing class itself (ZEND_ACC_MODULE), which is the module, not a member. */
-	if (FC(current_member_internal) && !(decl->flags & ZEND_ACC_MODULE)) {
+	/* PHP Modules: mark an internal member (CE-resident internal-ness). This covers
+	 * both an internal member class and the backing class of an internal *nested*
+	 * module — the caller sets FC(current_member_internal) precisely in those cases
+	 * (a top-level module's backing class is compiled with the signal cleared). */
+	if (FC(current_member_internal)) {
 		ce->ce_flags2 |= ZEND_ACC2_MODULE_INTERNAL;
 	}
 	ce->info.user.filename = zend_string_copy(zend_get_compiled_filename());
@@ -10460,6 +10462,14 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 	zend_ast *stmt_ast = ast->child[1];
 	zend_string *raw_name = zend_ast_get_str(name_ast);
 
+	/* An `internal` *nested* module: its backing class becomes an internal member of
+	 * the enclosing module (hidden from outside the parent). The parent set this
+	 * transient signal before dispatching here; capture it now and clear it so it
+	 * does not leak into this module's own member compilation below. It is only
+	 * meaningful when nested — a top-level module carries no visibility. */
+	bool module_is_internal = FC(current_member_internal);
+	FC(current_member_internal) = false;
+
 	/* Module manifests and membership declarations live in the root namespace. */
 	if (FC(current_namespace)) {
 		zend_error_noreturn(E_COMPILE_ERROR,
@@ -10600,7 +10610,11 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 			zend_ast *backing = zend_ast_create_decl(ZEND_AST_CLASS,
 				ZEND_ACC_MODULE, ast->lineno, NULL,
 				backing_name, NULL, NULL, backing_stmts, NULL, NULL);
+			/* If this is an internal nested module, mark its backing class as an
+			 * internal member of the enclosing module (gated against the parent). */
+			FC(current_member_internal) = module_is_internal;
 			zend_compile_top_stmt(backing);
+			FC(current_member_internal) = false;
 			zend_string_release(backing_name);
 		}
 
