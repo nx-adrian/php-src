@@ -1,5 +1,18 @@
 # PHP Modules — Implementation Design Notes (branch: php-modules)
 
+## Module::Member::class yields the FQN (fix)
+
+Audit found `M::C::class` (the ::class name literal of a module member class, by name)
+failed with "Undefined constant M::C" — it mis-parsed `M::C` as a class-constant fetch
+instead of a class name. The object forms (get_class, $obj::class, (new M::C)::class)
+all worked; only the by-name literal was broken. `zend_compile_class_ref` (new/instanceof/
+extends) already reinterprets a chained class-const operand into a canonical class name via
+`zend_try_module_chain_class`, but `zend_compile_class_name` (::class) did not. Added the
+same call there: if the class operand is a module-member chain, resolve to the canonical
+name and emit it as the ::class constant. Works at any depth and for internal types (::class
+is identity/observation, so it yields the name without constructing/reaching anything).
+Plain `Foo::class` unaffected. Test module_051.
+
 ## Internal enforcement bypass via class-constant resolution (security fix)
 
 Surfaced by a "random idea": store an internal type's FQN in a (public) const and walk

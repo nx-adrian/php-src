@@ -12150,6 +12150,17 @@ static void zend_compile_class_name(znode *result, const zend_ast *ast) /* {{{ *
 		return;
 	}
 
+	/* PHP Modules: "Module::Member::class" — the class operand is a class-const chain
+	 * ("M::C"). Resolve it to the canonical member-class name so `::class` yields the FQN
+	 * ("M::C"), matching get_class() and $obj::class, instead of evaluating "M::C" as a
+	 * class constant (which would fail with "Undefined constant M::C"). */
+	zend_string *module_chain = zend_try_module_chain_class(class_ast);
+	if (module_chain) {
+		ZVAL_STR(&result->u.constant, module_chain);
+		result->op_type = IS_CONST;
+		return;
+	}
+
 	if (class_ast->kind == ZEND_AST_ZVAL) {
 		zend_op *opline = zend_emit_op_tmp(result, ZEND_FETCH_CLASS_NAME, NULL, NULL);
 		opline->op1.num = zend_get_class_fetch_type(zend_ast_get_str(class_ast));
