@@ -297,6 +297,19 @@ reaching an internal *static* method via the chained `A::B::C()` syntax (that
 chained form is itself deferred — see the spike), are not yet done. Static
 internal enforcement works when the class is reached dynamically.
 
+### Pre-RFC hardening: error-message audit (planned, not yet done)
+
+Module resolution reuses engine paths that emit messages phrased for the
+non-module world, so a module mistake can produce a technically-correct but
+misleading diagnostic (e.g. the increment-8 bug surfaced as `Class "Vendor\App"
+not found` for a plain `strtoupper()` call). Before any RFC, sweep the
+developer-facing messages on every module failure path — unknown module,
+internal access from outside, unclaimed member, chained-`::` not-yet-supported,
+a module/class name collision — and ensure each names the module boundary and
+the actual problem, rather than leaving a stock "class not found"/"call to
+undefined" that points the developer at the wrong thing. Judge by "would a
+developer who hit this understand what they did wrong," not just correctness.
+
 ### Increment 8 (2026-07-07) — fix: module prefix must not hit function/const names. DONE.
 
 Bug: the module boundary prefix lived in the shared `zend_prefix_with_ns`, which
