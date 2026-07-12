@@ -10533,7 +10533,7 @@ static void zend_preregister_module_subtree(zend_string *mod_name, const zend_as
 		} else if (decl->kind == ZEND_AST_MODULE) {
 			simple = zend_ast_get_str(decl->child[0]);
 			nested_inline = (decl->child[1] != NULL);   /* has a body: recurse into it */
-		} else if (decl->kind == ZEND_AST_CONST_DECL
+		} else if (decl->kind == ZEND_AST_CLASS_CONST_GROUP
 				|| decl->kind == ZEND_AST_METHOD
 				|| decl->kind == ZEND_AST_PROP_GROUP) {
 			continue;
@@ -10727,19 +10727,17 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 			/* Module-level constants become class constants of the backing class,
 			 * not global constants. Collect them as class-const groups; they are
 			 * compiled below as part of the backing class, not here. */
-			if (decl->kind == ZEND_AST_CONST_DECL) {
-				/* Module constants become class constants of the backing class. An
-				 * `internal` one carries the low-bit member flag (fits the 16-bit attr).
-				 * Enforcement of internal *constants* is still pending (needs the
-				 * three-route fetch gate), so zend_compile_class_const_decl currently
-				 * rejects it — but the flag path is unified with properties here. */
+			if (decl->kind == ZEND_AST_CLASS_CONST_GROUP) {
+				/* Module constants become class constants of the backing class. The grammar
+				 * already produced a CLASS_CONST_GROUP (so an inline `#[Attr]` attaches to it
+				 * exactly as for a class-body constant); here we just stamp the module
+				 * visibility. An `internal` one carries the low-bit member flag. */
 				uint32_t cflags = ZEND_ACC_PUBLIC;
 				if (visibility == ZEND_MODULE_MEMBER_INTERNAL) {
 					cflags |= ZEND_ACC_MODULE_INTERNAL_MEMBER;
 				}
-				zend_ast *group = zend_ast_create(ZEND_AST_CLASS_CONST_GROUP, decl, NULL, NULL);
-				group->attr = cflags;
-				backing_stmts = zend_ast_list_add(backing_stmts, group);
+				decl->attr = cflags;
+				backing_stmts = zend_ast_list_add(backing_stmts, decl);
 				continue;
 			}
 
