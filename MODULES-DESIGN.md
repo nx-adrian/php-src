@@ -297,6 +297,29 @@ reaching an internal *static* method via the chained `A::B::C()` syntax (that
 chained form is itself deferred — see the spike), are not yet done. Static
 internal enforcement works when the class is reached dynamically.
 
+### Increment 8 (2026-07-07) — fix: module prefix must not hit function/const names. DONE.
+
+Bug: the module boundary prefix lived in the shared `zend_prefix_with_ns`, which
+resolves function and constant names too (via `zend_resolve_non_class_name`), not
+just class-like names. So a bare `strtoupper()` inside a module method became
+`Vendor\App::strtoupper`, whose `::` the engine then read as a static call —
+`Error: Class "Vendor\App" not found`. This broke the global-function fallback
+for every bare function/const call inside a module.
+
+Fix: `zend_prefix_with_ns` is namespace-only again; the module prefix moved to a
+new `zend_prefix_class_with_module_and_ns`, used only for **class-like** names
+(class/interface/trait/enum — they share `zend_compile_class_decl` and
+`zend_resolve_class_name`). Functions and constants keep plain namespace
+resolution and their global fallback.
+
+Verified: bare `strtoupper/trim/strlen`, rooted `\strtoupper`, and global
+constants (`M_PI`) all resolve correctly from a method inside a module; bare
+class-like references still resolve module-relative (`implements Drawable` →
+`Widgets::Drawable`). Regression test `module_014_function_resolution`; no
+regression in namespaces/lang/function tests. (Note: bare *class-like* names are
+module-relative with no global fallback — consistent with namespace semantics for
+unqualified class names — so a global class inside a module needs a leading `\`.)
+
 ### Increment 7 (2026-07-07) — conflict-free `::` (supersedes the %expect 1 tradeoff). DONE.
 
 The increment-2 grammar accepted one shift/reduce conflict (`%expect 1`) by

@@ -1099,16 +1099,23 @@ static zend_string *zend_concat_names(const char *name1, size_t name1_len, const
 }
 
 static zend_string *zend_prefix_with_ns(zend_string *name) {
-	zend_string *ns_prefixed;
 	if (FC(current_namespace)) {
 		const zend_string *ns = FC(current_namespace);
-		ns_prefixed = zend_concat_names(ZSTR_VAL(ns), ZSTR_LEN(ns), ZSTR_VAL(name), ZSTR_LEN(name));
+		return zend_concat_names(ZSTR_VAL(ns), ZSTR_LEN(ns), ZSTR_VAL(name), ZSTR_LEN(name));
 	} else {
-		ns_prefixed = zend_string_copy(name);
+		return zend_string_copy(name);
 	}
-	/* PHP Modules: a module-owned symbol gets the "<module>::" boundary prefix in
-	 * front of its (possibly namespace-prefixed) name, yielding e.g.
-	 * "VendorName\User::Auth\PasswordChecker". */
+}
+
+/* PHP Modules: like zend_prefix_with_ns, but additionally prepends the enclosing
+ * module boundary "<module>::" — yielding e.g. "VendorName\User::Auth\PasswordChecker".
+ * Used ONLY for class-like names (class/interface/trait/enum, declarations and
+ * references), which all flow through zend_compile_class_decl and
+ * zend_resolve_class_name. Functions and constants keep plain namespace
+ * resolution, including their global fallback, so a bare "strtoupper()" inside a
+ * module still resolves to the global function. */
+static zend_string *zend_prefix_class_with_module_and_ns(zend_string *name) {
+	zend_string *ns_prefixed = zend_prefix_with_ns(name);
 	if (FC(current_module)) {
 		const zend_string *mod = FC(current_module);
 		zend_string *result = zend_string_concat3(
@@ -1210,7 +1217,7 @@ static zend_string *zend_resolve_class_name(zend_string *name, uint32_t type) /*
 	}
 
 	if (type == ZEND_NAME_RELATIVE) {
-		return zend_prefix_with_ns(name);
+		return zend_prefix_class_with_module_and_ns(name);
 	}
 
 	if (type == ZEND_NAME_FQ) {
@@ -1262,8 +1269,9 @@ static zend_string *zend_resolve_class_name(zend_string *name, uint32_t type) /*
 		}
 	}
 
-	/* If not fully qualified and not an alias, prepend the current namespace */
-	return zend_prefix_with_ns(name);
+	/* If not fully qualified and not an alias, prepend the module (if any) and
+	 * the current namespace. */
+	return zend_prefix_class_with_module_and_ns(name);
 }
 /* }}} */
 
@@ -9619,7 +9627,7 @@ static void zend_compile_class_decl(znode *result, const zend_ast *ast, bool top
 			type = "a trait name";
 		}
 		zend_assert_valid_class_name(unqualified_name, type);
-		name = zend_prefix_with_ns(unqualified_name);
+		name = zend_prefix_class_with_module_and_ns(unqualified_name);
 		name = zend_new_interned_string(name);
 		lcname = zend_string_tolower(name);
 
