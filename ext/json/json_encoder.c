@@ -154,6 +154,12 @@ static zend_result php_json_encode_array(smart_str *buf, zval *val, int options,
 				/* Skip protected and private members. */
 				continue;
 			}
+			/* PHP Modules: skip an internal property when encoding from outside its module,
+			 * the way private/protected are skipped from outside the class. */
+			if (UNEXPECTED(prop_info->flags & ZEND_ACC_MODULE_INTERNAL_MEMBER)
+					&& zend_module_property_hidden(prop_info, zend_get_executed_scope())) {
+				continue;
+			}
 			zval *prop = OBJ_PROP(obj, prop_info->offset);
 			if (Z_TYPE_P(prop) == IS_UNDEF) {
 				continue;

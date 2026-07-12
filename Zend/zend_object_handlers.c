@@ -106,6 +106,73 @@ ZEND_API HashTable *rebuild_object_properties_internal(zend_object *zobj) /* {{{
 /* }}} */
 
 /* Implements the fast path for array cast */
+static zend_always_inline const zend_class_entry *get_fake_or_executed_scope(void);
+
+/* PHP Modules: is `prop_info` an internal property that must be hidden from `scope`,
+ * i.e. from enumeration/serialization outside the owning module? The flag test is a
+ * single AND; the module-scope check runs only for an actual internal property. */
+ZEND_API bool zend_module_property_hidden(const zend_property_info *prop_info, const zend_class_entry *scope)
+{
+	return (prop_info->flags & ZEND_ACC_MODULE_INTERNAL_MEMBER)
+		&& !zend_module_scope_allows(prop_info->ce, scope);
+}
+
+/* PHP Modules: for enumeration/serialization purposes that expose properties by (public)
+ * visibility outside a class — json_encode and (array) cast — an object's `internal`
+ * properties must be hidden from outside the module, the way `private`/`protected` are
+ * hidden from outside the class. `get_object_vars`/`foreach` already filter via
+ * zend_get_property_info; the fast paths (json inline loop, build_object_properties_array)
+ * are patched directly. This covers the *slow* paths (an object with dynamic or hooked
+ * properties, which go through get_properties_for): if the class is a module member and
+ * the executing scope is outside its module, return a copy of `ht` minus the hidden
+ * internal properties; otherwise NULL (caller uses `ht` unchanged). SERIALIZE is not
+ * filtered — the RFC states an escaped internal object may be serialized. */
+static HashTable *zend_module_filter_internal_properties(zend_class_entry *ce, HashTable *ht)
+{
+	/* Only module member classes (name carries "::") can declare internal properties. */
+	if (zend_memnstr(ZSTR_VAL(ce->name), "::", 2, ZSTR_VAL(ce->name) + ZSTR_LEN(ce->name)) == NULL) {
+		return NULL;
+	}
+	const zend_class_entry *scope = get_fake_or_executed_scope();
+	zend_string *key;
+	zval *val;
+	/* First pass: is there anything to hide from this scope? Avoids allocating otherwise. */
+	bool any_hidden = false;
+	ZEND_HASH_MAP_FOREACH_STR_KEY_VAL(ht, key, val) {
+		if (key) {
+			zend_property_info *pi = zend_hash_find_ptr(&ce->properties_info, key);
+			if (pi && zend_module_property_hidden(pi, scope)) { any_hidden = true; break; }
+		}
+	} ZEND_HASH_FOREACH_END();
+	if (!any_hidden) {
+		return NULL;
+	}
+	HashTable *out = zend_new_array(zend_hash_num_elements(ht));
+	zend_ulong idx;
+	ZEND_HASH_MAP_FOREACH_KEY_VAL(ht, idx, key, val) {
+		if (key) {
+			zend_property_info *pi = zend_hash_find_ptr(&ce->properties_info, key);
+			if (pi && zend_module_property_hidden(pi, scope)) {
+				continue;
+			}
+			zval tmp;
+			ZVAL_COPY_VALUE(&tmp, val);
+			if (Z_TYPE(tmp) != IS_INDIRECT && Z_TYPE(tmp) != IS_PTR) {
+				Z_TRY_ADDREF(tmp);
+			}
+			zend_hash_add_new(out, key, &tmp);
+		} else {
+			zval tmp;
+			ZVAL_COPY_VALUE(&tmp, val);
+			if (Z_TYPE(tmp) != IS_INDIRECT && Z_TYPE(tmp) != IS_PTR) {
+				Z_TRY_ADDREF(tmp);
+			}
+			zend_hash_index_add_new(out, idx, &tmp);
+		}
+	} ZEND_HASH_FOREACH_END();
+	return out;
+}
+
 ZEND_API HashTable *zend_std_build_object_properties_array(zend_object *zobj) /* {{{ */
 {
 	const zend_class_entry *ce = zobj->ce;
@@ -122,6 +189,13 @@ ZEND_API HashTable *zend_std_build_object_properties_array(zend_object *zobj) /*
 			const zend_property_info *prop_info = ce->properties_info_table[i];
 
 			if (!prop_info) {
+				continue;
+			}
+
+			/* PHP Modules: hide an internal property from an (array) cast performed
+			 * outside its module (scope resolved lazily, only if an internal prop exists). */
+			if (UNEXPECTED(prop_info->flags & ZEND_ACC_MODULE_INTERNAL_MEMBER)
+					&& zend_module_property_hidden(prop_info, get_fake_or_executed_scope())) {
 				continue;
 			}
 
@@ -2818,12 +2892,24 @@ ZEND_API HashTable *zend_std_get_properties_for(zend_object *obj, zend_prop_purp
 			}
 			ht = obj->handlers->get_properties(obj);
 			if (ht) {
+				/* PHP Modules: hide internal properties from json_encode outside the module. */
+				if (purpose == ZEND_PROP_PURPOSE_JSON) {
+					HashTable *filtered = zend_module_filter_internal_properties(obj->ce, ht);
+					if (filtered) {
+						return filtered;
+					}
+				}
 				GC_TRY_ADDREF(ht);
 			}
 			return ht;
 		case ZEND_PROP_PURPOSE_ARRAY_CAST:
 			ht = zend_get_properties_no_lazy_init(obj);
 			if (ht) {
+				/* PHP Modules: hide internal properties from an (array) cast outside the module. */
+				HashTable *filtered = zend_module_filter_internal_properties(obj->ce, ht);
+				if (filtered) {
+					return filtered;
+				}
 				GC_TRY_ADDREF(ht);
 			}
 			return ht;
