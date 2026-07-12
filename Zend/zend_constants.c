@@ -348,6 +348,20 @@ ZEND_API zval *zend_get_class_constant_ex(zend_string *class_name, zend_string *
 		ce = zend_fetch_class(class_name, flags);
 	}
 	if (ce) {
+		/* PHP Modules: gate the *class* the constant lives on. An internal class, or a
+		 * (public) class that lives inside an internal nested module, is not reachable
+		 * from outside its module — even for a public constant. The FETCH_CLASS_CONSTANT
+		 * opcode gates its by-name class fetch, but the CE-cache path above, `constant()`,
+		 * and constant-expression folding all reach here without that gate, which would
+		 * otherwise leak a public constant of an internal type (e.g. via
+		 * `constant("M::Secret::HIDDEN")` or a chained `A::PATH::HIDDEN`). */
+		if (UNEXPECTED(zend_module_runtime_access_denied(ce))) {
+			if ((flags & ZEND_FETCH_CLASS_SILENT) == 0) {
+				zend_throw_error(NULL,
+					"Cannot access internal module member \"%s\" from outside its module", ZSTR_VAL(class_name));
+			}
+			goto failure;
+		}
 		c = zend_hash_find_ptr(CE_CONSTANTS_TABLE(ce), constant_name);
 		if (c == NULL) {
 			if ((flags & ZEND_FETCH_CLASS_SILENT) == 0) {
