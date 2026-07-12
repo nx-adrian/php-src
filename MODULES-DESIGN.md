@@ -544,3 +544,45 @@ resolution. This is identical to how a normal class already lets `const X`,
 **rejected**: it protects against no real conflict, would surprise users, and
 diverges from class semantics for no benefit. Sub-slice (a) therefore just
 populates the backing CE's tables; resolution stays position-directed.
+
+## Increment 12(a) — module constants via the synthetic backing class
+
+First slice of module-level statics. Module-level `const` members no longer become
+global constants; they become **class constants of a synthetic backing class**
+named plainly after the module.
+
+- **Construction.** `zend_compile_module` partitions members: class-like decls
+  compile as before (member classes keyed `M::X`); `ZEND_AST_CONST_DECL` members
+  are gathered into `ZEND_AST_CLASS_CONST_GROUP`s and wrapped in a synthesized
+  `ZEND_AST_CLASS` decl, compiled via `zend_compile_top_stmt`. Because it's a real
+  class entry, it inherits registration, the runtime `DECLARE_CLASS` op, opcache
+  SHM/file-cache persistence, and reflection for free — `M::C` survives cache hits
+  with zero extra work (test module_020).
+- **Naming friction resolved.** The backing class is compiled *after* the member
+  loop clears `FC(current_module)`, so `zend_prefix_class_with_module_and_ns` leaves
+  the name plain `M` (not `M::M`). Asserted.
+- **Access.** `M::C` (external) parses as an ordinary class-const fetch — no new
+  grammar. `module::C` (internal self-reference) added: `T_MODULE :: identifier` in
+  the `class_constant` production, via a bare-`module` backing-class reference
+  (`zend_ast_create_module_backing_name` → empty-member `ZEND_NAME_MODULE_SELF`,
+  which `zend_resolve_class_name` maps to the plain module name, no membership
+  check). `%expect 0` still holds. `module::class` correctly yields `"M"`.
+- **Non-instantiable** via `ZEND_ACC_EXPLICIT_ABSTRACT_CLASS` — `new M()` throws.
+- **Name overlap works as ruled:** `const Invoice` + `class Invoice` coexist; the
+  constant answers in value position, the member class in class-reference position.
+
+Tests module_019 (functional) + module_020 (opcache persistence). 20→22 module
+tests green; 505 core const/class/ns/grammar/enum/trait tests green.
+
+**Known limitations (follow-ups):**
+- `new M()` message says "abstract class M" — should be module-specific (needs a
+  `ZEND_ACC_MODULE`-style flag + guarded message; also to block `extends M`, which
+  abstract currently permits).
+- `internal const` is not yet enforced — all module constants are currently mapped
+  to public. Internal-constant enforcement needs the class-const fetch path + flag
+  handling (deferred with the rest of internal-static enforcement).
+- Modules with no static members create no backing class, so `class M` after a
+  static-less `module M` does not collide (pre-existing shared-symbol gap;
+  always-creating an empty backing class would close it — a small (B)-leaning step).
+- Next slices: (b) static functions `M::f()` / `module::f()`; (c) static properties
+  `M::$x` / `module::$x`.
