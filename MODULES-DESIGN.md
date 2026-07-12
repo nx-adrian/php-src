@@ -1836,9 +1836,14 @@ built solely from that token —
 ```
 ns_member_ref:
       class_name    T_PAAMAYIM_NEKUDOTAYIM T_NAME_QUALIFIED
+    | T_MODULE      T_PAAMAYIM_NEKUDOTAYIM T_NAME_QUALIFIED   /* module::Ns\Member self-reference */
     | ns_member_ref T_PAAMAYIM_NEKUDOTAYIM T_NAME_QUALIFIED
 ;
 ```
+(The `T_MODULE` seed handles the `module::Ns\Member` self-reference from inside a module — the internal
+analogue of `Module::Ns\Member`; without it, a namespaced member could be reached from *outside* but not
+via `module::` from *inside*. Surfaced by the Composer demo, whose `Invoice::render()` uses
+`module::Tax\Rate::apply()`. Test: `module_068`.) The rule is
 — threaded into `class_constant`, `static_member`, and the static call (`::class` comes along for free,
 since `class` is an `identifier`). It yields an FQ canonical name node (`Vendor\User::Auth\Checker`),
 which resolves through the ordinary FQ class path — the *same* path as `new Vendor\User::Auth\Checker()`
