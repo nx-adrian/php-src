@@ -1949,3 +1949,38 @@ inaccessibility all unchanged. Tests `module_070` (seal) and `module_071` (virtu
 over-restricted); playground `module-playground/audit/audit_u_internal_method_seal.php`. Full suite
 green: 73 module tests, `Zend/tests` clean (only the pre-existing `arginfo_zpp_mismatch` failures),
 traits/classes/reflection clean. Only `zend_inheritance.c` changes.
+
+## `internal` properties are hidden from json_encode / (array) cast outside the module (E2)
+
+**Concern.** An `internal` instance property is `ZEND_ACC_PUBLIC` plus the internal marker, so
+enumeration/serialization that exposes properties by public visibility leaked it from outside the
+module: `json_encode()` included it (whereas `private` is excluded) and `(array)` cast exposed it under
+its plain name (whereas `private` appears name-mangled). `get_object_vars()`/`foreach` already hid it —
+they filter via `zend_get_property_info`, which returns `ZEND_WRONG_PROPERTY_INFO` for an internal
+property read from outside.
+
+**Fix.** Hide an internal property from outside the module in `json_encode` and `(array)` cast, the way
+`private`/`protected` are hidden from outside the class:
+- Both have a *fast path* over `ce->properties_info_table` (json's inline loop;
+  `zend_std_build_object_properties_array` for the cast). Skip a property there when
+  `prop_info` is internal and the executing scope is outside its module — the flag test is a single AND,
+  and the scope is resolved lazily only when an internal property is actually present.
+- The *slow paths* (an object with dynamic or hooked properties) run through
+  `zend_std_get_properties_for`; for the JSON and ARRAY_CAST purposes it now returns a filtered copy of
+  the table (minus the hidden internal properties) when the class is a module member and the scope is
+  outside. Gated on the class name carrying `::`, so non-module objects are untouched.
+
+Shared predicate `zend_module_property_hidden(prop_info, scope)`. Scope is the executing user scope, so
+a module's own code (e.g. `Invoice::toArray()` calling `json_encode($this)`) still sees the property.
+
+**Deliberately not filtered:** `var_export()` (which shows `private` too) and `serialize()` — the RFC
+states an escaped internal object *may* be serialized, with `__serialize()` as the control point. So the
+model matches `private` where `private` hides (json / get_object_vars / foreach / cast-plain-access) and
+follows the spec where it doesn't (var_export / serialize).
+
+**Verified:** internal hidden from `json_encode`, `(array)` cast (both fast and slow paths, incl. an
+object with a dynamic property), `get_object_vars`, `foreach` outside the module; visible from inside;
+`var_export`/`serialize` unchanged. Test `module_072`; playground
+`module-playground/audit/audit_v_internal_property_hidden.php`. Full suite green: 74 module tests,
+`Zend/tests` clean (only the pre-existing `arginfo_zpp_mismatch` failures), ext/json, ext/standard
+array/serialize suites clean. Changes: `zend_object_handlers.c/.h`, `ext/json/json_encoder.c`.

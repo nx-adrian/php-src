@@ -288,6 +288,7 @@ static zend_always_inline HashTable *zend_std_get_properties_ex(zend_object *obj
 
 /* Implements the fast path for array cast */
 ZEND_API HashTable *zend_std_build_object_properties_array(zend_object *zobj);
+ZEND_API bool zend_module_property_hidden(const zend_property_info *prop_info, const zend_class_entry *scope);
 
 static zend_always_inline bool ZEND_STD_BUILD_OBJECT_PROPERTIES_ARRAY_COMPATIBLE(const zval *zv) {
 	/* We can use zend_std_build_object_properties_array() for objects
