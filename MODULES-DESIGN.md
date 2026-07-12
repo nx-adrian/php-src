@@ -661,3 +661,46 @@ need it).
 Test module_023. 24 module + 524 core (class/method/static/grammar/ns/trait/const/
 enum) tests green. Follow-ups: static **properties** (slice c); internal **const**
 enforcement (still deferred); a clearer parse error for a non-static module function.
+
+## Increment 12(c) — module static properties (public); internal statics deferred
+
+Module-level `static` properties become static properties of the backing class.
+
+- **Grammar.** `module_member` gains `member_visibility T_STATIC
+  optional_type_without_static property_list ';'` (a `ZEND_AST_PROP_GROUP` wrapped
+  in `ZEND_AST_MODULE_MEMBER`). `module::$x` added to `static_member`
+  (`T_MODULE :: simple_variable`, via the bare backing-class ref). `M::$x` external
+  needs no new grammar. `%expect 0` holds.
+- **Routing.** `zend_compile_module` partitions `ZEND_AST_PROP_GROUP` members into
+  the backing class; typed props, defaults, read/write, and `module::$x` self-ref
+  all work through the normal static-property machinery.
+
+### The 16-bit attr wall (important finding) → internal statics deferred cleanly
+
+Internal static **properties** and **constants** are rejected with a clear compile
+error ("... not yet supported; declare it public") rather than shipped unenforced.
+Root cause: `zend_ast->attr` is **16 bits**, so `ZEND_ACC_MODULE_INTERNAL` (bit 31)
+cannot ride in a prop-group/const-group's `attr` — it truncates to 0 (confirmed by
+debug: an "internal" static prop reached `property_info->flags = 0x11`, i.e.
+PUBLIC|STATIC only). Internal static **functions** are unaffected because methods
+carry flags in the 32-bit `zend_ast_decl->flags`, which is why 12(b) enforced them
+for free.
+
+The **runtime gate for internal static properties is already implemented** and
+correct (`zend_std_get_static_property_with_info` now checks
+`ZEND_ACC_MODULE_INTERNAL` via `zend_module_scope_allows`, same slow path as
+private/protected so cache-slot reuse is fine) — it is simply dormant until a
+property can actually carry the flag.
+
+**Deferred work (one dedicated increment): internal static-member enforcement for
+properties + constants.** The missing piece is a channel to convey per-member
+internal-ness into backing-class compilation, since the 16-bit attr can't. Plan:
+before compiling the backing class, record the set of internal static-member names;
+after compilation, set `ZEND_ACC_MODULE_INTERNAL` directly on the backing CE's
+`properties_info` / `constants_table` entries (capturing the CE — e.g. via the RTD
+key or a small capture hook). Properties then enforce immediately (single runtime
+gate, already in place); constants additionally need the three-route gate
+(compile-fold + FETCH_CLASS_CONSTANT VM handler + zend_get_class_constant_ex).
+
+Tests module_024 (public static props), module_025 (internal rejected). 25 module +
+732 core (class/static/grammar/ns/trait/const/enum/property) tests green.

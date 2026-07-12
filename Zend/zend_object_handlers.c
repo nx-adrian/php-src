@@ -2212,6 +2212,18 @@ ZEND_API zval *zend_std_get_static_property_with_info(zend_class_entry *ce, zend
 		}
 	}
 
+	/* PHP Modules: a module-internal static property is reachable only from inside
+	 * its own module (it is public at the class level, so the check above does not
+	 * cover it). Same slow path as private/protected, so cache-slot reuse is fine. */
+	if (UNEXPECTED(property_info->flags & ZEND_ACC_MODULE_INTERNAL)
+			&& !zend_module_scope_allows(property_info->ce, get_fake_or_executed_scope())) {
+		if (type != BP_VAR_IS) {
+			zend_throw_error(NULL, "Cannot access internal module property %s::$%s from outside its module",
+				ZSTR_VAL(ce->name), ZSTR_VAL(property_name));
+		}
+		return NULL;
+	}
+
 	if (UNEXPECTED((property_info->flags & ZEND_ACC_STATIC) == 0)) {
 undeclared_property:
 		if (type != BP_VAR_IS) {
