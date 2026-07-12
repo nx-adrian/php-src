@@ -12,4 +12,4 @@ module M {
 }
 ?>
 --EXPECTF--
-Fatal error: "M::Nope" is not a member of module "M" in %s on line %d
+Fatal error: "Nope" is not a member of module "M" in %s on line %d

@@ -1846,7 +1846,7 @@ static ZEND_COLD void report_class_fetch_error(const zend_string *class_name, ui
 				} else {
 					zend_throw_or_error(fetch_type, NULL,
 						"\"%s\" is not a member of module \"%s\"",
-						ZSTR_VAL(class_name), ZSTR_VAL(mce->name));
+						ZSTR_VAL(member), ZSTR_VAL(mce->name));
 					return;
 				}
 			}
