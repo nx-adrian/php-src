@@ -10,13 +10,15 @@ module M {
     public class Freely {
         public int $n = 2;                      // no __clone: cloneable from anywhere
     }
-    public static function make(): Widget { return new module::Widget; }
-    public static function makeFreely(): Freely { return new module::Freely; }
-    public static function cloneInside(Widget $w): Widget { return clone $w; }  // same module: allowed
+    public class Api {
+        public static function make(): Widget { return new module::Widget; }
+        public static function makeFreely(): Freely { return new module::Freely; }
+        public static function cloneInside(Widget $w): Widget { return clone $w; }  // same module: allowed
+    }
 }
 
-$w = M::make();
-$f = M::makeFreely();
+$w = M::Api::make();
+$f = M::Api::makeFreely();
 
 // Outside the module: internal __clone blocks both the clone opcode and clone().
 try { $c = clone $w; echo "opcode: cloned\n"; }
@@ -26,7 +28,7 @@ try { $c = clone($w); echo "fn: cloned\n"; }
 catch (\Error $e) { echo "fn: ", $e->getMessage(), "\n"; }
 
 // Inside the module: cloning is allowed.
-$ci = M::cloneInside($w);
+$ci = M::Api::cloneInside($w);
 echo "inside: cloned n=", $ci->n, "\n";
 
 // A public class with no __clone stays cloneable from outside (unchanged behavior).

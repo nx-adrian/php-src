@@ -16,8 +16,6 @@ module App {
     #[\Tag("iface")]                  public interface Contract {}
     #[\Tag("trait")]                  public trait Helper {}
     #[\Tag("enum")]                   public enum E: string { case X = "x"; }
-    #[\Tag("fn")]                     public static function f(): void {}
-    #[\Tag("prop")]                   public static string $p = "v";
     #[\Tag("const")]                  public const K = 1;
     #[Local("bare")]                  public class UsesLocal {}   // bare -> App::Local
     #[\Tag("intern")]                 internal class Secret {}    // attribute + internal compose
@@ -31,8 +29,6 @@ echo tagOf((new ReflectionClass(App::C::class))->getAttributes()), "\n";
 echo tagOf((new ReflectionClass(App::Contract::class))->getAttributes()), "\n";
 echo tagOf((new ReflectionClass(App::Helper::class))->getAttributes()), "\n";
 echo tagOf((new ReflectionClass(App::E::class))->getAttributes()), "\n";
-echo tagOf((new ReflectionMethod("App", "f"))->getAttributes()), "\n";
-echo tagOf((new ReflectionProperty("App", "p"))->getAttributes()), "\n";
 echo tagOf((new ReflectionClassConstant("App", "K"))->getAttributes()), "\n";
 
 // Bare attribute name resolves module-relative (App::Local), like any bare class ref.
@@ -49,8 +45,6 @@ Tag:cls
 Tag:iface
 Tag:trait
 Tag:enum
-Tag:fn
-Tag:prop
 Tag:const
 App::Local:bare
 Tag:intern internal=true

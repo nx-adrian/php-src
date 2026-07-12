@@ -6,12 +6,14 @@ module M {
     internal class Widget {
         public function pub(): string { return "pub"; }
     }
-    public static function make(): Widget { return new module::Widget; }
-    // Same-module re-instantiation from an escaped object must still work.
-    public static function reNew(Widget $w): Widget { return new $w; }
+    public class Api {
+        public static function make(): Widget { return new module::Widget; }
+        // Same-module re-instantiation from an escaped object must still work.
+        public static function reNew(Widget $w): Widget { return new $w; }
+    }
 }
 
-$w = M::make();
+$w = M::Api::make();
 
 // Public surface of the escaped object still usable.
 echo "surface: ", $w->pub(), "\n";
@@ -29,7 +31,7 @@ try { $x = new $cn; echo "new get_class: made\n"; }
 catch (\Error $e) { echo "new get_class: ", $e->getMessage(), "\n"; }
 
 // Inside the module, re-instantiation from the escaped object is allowed.
-echo "inside: ", get_class(M::reNew($w)), "\n";
+echo "inside: ", get_class(M::Api::reNew($w)), "\n";
 ?>
 --EXPECT--
 surface: pub

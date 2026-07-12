@@ -2,8 +2,7 @@
 Modules: visibility is optional inside a module block and defaults to public
 --DESCRIPTION--
 Inside a `module { }` block a member with no visibility keyword defaults to public — for
-every member kind: class, interface, trait, enum, module-level const / static function /
-static property, a nested module, and a body-less claim. `internal` must still be written
+every member kind: class, interface, trait, enum, module-level const, a nested module, and a body-less claim. `internal` must still be written
 explicitly, and an explicit internal member stays gated from outside. (Unclaimed split-file
 symbols default to internal instead — that boundary is exercised in module_048.)
 --FILE--
@@ -14,8 +13,6 @@ module M {
     trait T { public function hi(): string { return "hi"; } }  // -> public
     enum E: int { case One = 1; }                  // -> public
     const K = 41;                                  // -> public
-    static function f(): int { return 42; }        // -> public
-    static int $p = 43;                            // -> public
     module Inner { class G {} }                    // -> public nested module + public member
     internal class X {}                            // explicit internal (gated outside)
     public class B {}                              // explicit public (unchanged)
@@ -30,8 +27,8 @@ class UsesT { use M::T; }
 echo (new UsesT())->hi(), "\n";
 echo M::E::One->value, "\n";
 
-// module-level const / static fn / static prop are public
-echo M::K, " ", M::f(), " ", M::$p, "\n";
+// module-level const is public
+echo M::K, "\n";
 
 // nested module + its member are public
 var_dump(new M::Inner::G() instanceof M::Inner::G);
@@ -50,7 +47,7 @@ bool(true)
 bool(true)
 hi
 1
-41 42 43
+41
 bool(true)
 public internal
 bool(false)

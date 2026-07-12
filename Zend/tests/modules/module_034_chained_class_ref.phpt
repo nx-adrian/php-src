@@ -16,11 +16,13 @@ module Outer {
         }
 
         // "module::" self-references, both single- and multi-segment, from inside
-        // the nested module.
-        public static function build(): string {
-            return (new module::Gadget)->who()          // module::Gadget
-                 . "/" . module::Gadget::make()          // module::Gadget::make()
-                 . "/" . (new module::Secret)->s();      // internal, allowed inside
+        // a member class of the nested module.
+        public class Api {
+            public static function build(): string {
+                return (new module::Gadget)->who()          // module::Gadget
+                     . "/" . module::Gadget::make()          // module::Gadget::make()
+                     . "/" . (new module::Secret)->s();      // internal, allowed inside
+            }
         }
     }
 }
@@ -40,7 +42,7 @@ function useit(Outer::Inner::Base $b): Outer::Inner::Base { return $b; }
 echo useit(new Outer::Inner::Base)->tag(), "\n";
 
 // module:: self-references (single and multi-segment)
-echo Outer::Inner::build(), "\n";
+echo Outer::Inner::Api::build(), "\n";
 
 // internal member is still gated when named through the chain from outside
 try {

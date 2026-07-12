@@ -4,9 +4,9 @@ Modules: dynamic "instanceof $name" sees through an internal type (identity), li
 <?php
 module M {
     internal class Sec {}
-    public static function make(): Sec { return new module::Sec; }
+    public class Api { public static function make(): Sec { return new module::Sec; } }
 }
-$o = M::make();
+$o = M::Api::make();
 $n = "M::Sec";
 
 // Identity/observation is not gated, regardless of literal vs dynamic form.

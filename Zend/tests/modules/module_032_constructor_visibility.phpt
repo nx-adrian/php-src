@@ -8,8 +8,10 @@ module Billing {
         internal function __construct(public array $data) {}
         public function total(): int { return array_sum($this->data); }
     }
-    public static function report(array $d): TaxReport {
-        return new module::TaxReport($d);                     // inside: allowed
+    public class Api {
+        public static function report(array $d): TaxReport {
+            return new module::TaxReport($d);                 // inside: allowed
+        }
     }
     // fully public class for contrast
     public class Config {
@@ -18,7 +20,7 @@ module Billing {
 }
 
 // From inside the module (via the factory)
-echo Billing::report([10, 20, 30])->total(), "\n";           // 60
+echo Billing::Api::report([10, 20, 30])->total(), "\n";       // 60
 
 // A fully public class is freely constructible
 echo (new Billing::Config("dev"))->env, "\n";                 // dev

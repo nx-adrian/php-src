@@ -1,27 +1,13 @@
 --TEST--
-Modules: module static properties on the backing class (M::$x / module::$x)
+Modules: module-level static properties are deferred (compile error)
 --FILE--
 <?php
+// Module-level `static` property members are deferred to a future proposal (module state /
+// instantiable modules). Declaring one is a compile-time error; a module may still declare
+// classes, interfaces, enums, traits, constants, and nested modules.
 module Counter {
     public static int $count = 0;
-    public static string $label = "n";
-
-    public static function bump(): void { module::$count++; }        // module::$x write
-    public static function tag(): string { return module::$label; }  // module::$x read
 }
-
-Counter::bump();
-Counter::bump();
-Counter::bump();
-echo Counter::$count, "\n";           // external read -> 3
-
-Counter::$count = 100;                  // external write
-echo Counter::$count, "\n";           // -> 100
-
-Counter::$label = "hits";
-echo Counter::tag(), "\n";            // module::$label read from inside -> hits
 ?>
---EXPECT--
-3
-100
-hits
+--EXPECTF--
+Fatal error: Module-level static properties are not supported (deferred to a future proposal); a module may declare classes, interfaces, enums, traits, constants, and nested modules in %s on line %d

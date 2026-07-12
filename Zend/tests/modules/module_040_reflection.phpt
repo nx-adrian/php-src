@@ -9,8 +9,6 @@ module Shop {
     public enum Status { case A; }
     public const VERSION = "1.2.3";
     internal const SECRET = 42;
-    public static function calc(): int { return 1; }
-    internal static function log(): void {}
     public module Sub { public class Widget {} }
 
     public class Widget {
@@ -51,7 +49,7 @@ classes:    Shop::Cart,Shop::Ledger,Shop::Widget
 interfaces: Shop::Payable
 enums:      Shop::Status
 modules:    Shop::Sub
-functions:  Shop::calc,Shop::log
+functions:  
 constants:  {"VERSION":"1.2.3","SECRET":42}
 vis Cart:   public
 vis Ledger: internal
