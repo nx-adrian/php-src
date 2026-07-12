@@ -1717,3 +1717,12 @@ a `namespace`), which is exactly what let a block precede a membership. Added an
 the new membership self-check in `zend_compile_module` passes `false`, so a preceding module node
 (a block or another membership) is rejected. The intended patterns `module X; namespace Y;` and
 `module X; module Inner { … }` keep the membership first and are unaffected. Test: module_062.
+
+## Reflection reports a module as non-instantiable / non-cloneable
+
+`ReflectionClass::isInstantiable()` and `::isCloneable()` tested INTERFACE | TRAIT |
+EXPLICIT_ABSTRACT | IMPLICIT_ABSTRACT | ENUM but not ZEND_ACC_MODULE, so a module's backing
+class fell through and reported `true` — even though `new M` fatals with "Cannot instantiate
+module" (the engine `new` guard keys off ZEND_ACC_UNINSTANTIABLE, which a module carries).
+Added ZEND_ACC_MODULE to both flag checks so reflection agrees with the engine. Member
+classes are unaffected. Test: module_063.
