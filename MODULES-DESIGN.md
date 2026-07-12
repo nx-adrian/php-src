@@ -1,5 +1,33 @@
 # PHP Modules — Implementation Design Notes (branch: php-modules)
 
+## Internal enforcement bypass via class-constant resolution (security fix)
+
+Surfaced by a "random idea": store an internal type's FQN in a (public) const and walk
+it — `A::PATH::CONST` where `A::PATH == "M::Secret"` — or use `constant("M::Secret::H")`.
+These read a public constant of an *internal* class from outside the module, bypassing
+the boundary, while direct `M::Secret::H`, `new`, method, and property access were all
+correctly denied. Pre-existing (verified on the parent commit); only class *constant*
+reads leaked. Design decision (user): public chains should work (consistent with PHP —
+`X::Y::Z` walking class-const values is fine), but `internal` must be respected.
+
+Two ungated resolution routes, now closed:
+1. `zend_get_class_constant_ex` (used by `constant()` and AST const-eval) resolved the
+   class from the CE cache and only gated the *constant's* own visibility, never the
+   *class's* module-internal status. Added a `zend_module_runtime_access_denied(ce)`
+   check on the resolved class.
+2. Compile-time folding: `zend_compile_class_const` folds the class operand
+   (`A::PATH` -> "M::Secret") and `zend_try_ct_eval_class_const` substitutes the value at
+   compile time — no runtime gate. Fix: never compile-time-fold a *module member* class
+   constant (name contains "::"); defer to the `ZEND_FETCH_CLASS_CONSTANT` opcode, which
+   gates with the correct runtime scope. Public members still resolve (just at runtime);
+   non-module class consts (no "::") fold unchanged, so blast radius is module-only.
+
+Verified: direct / const-walk / constant() / dynamic all denied from outside; public
+chains (module and plain `X::Y::W`) and all same-module access still work. Also confirmed
+declarations reject `::` names (`class A::B {}` is a parse error) — the chained `::` only
+parses in reference/expression positions. Test module_050. 52/52 module tests; constants/
+enum/type-declaration regressions green.
+
 ## catch of an internal exception type must work (identity vs use)
 
 Audit found the class-reference gating inconsistent: from outside a module, new /

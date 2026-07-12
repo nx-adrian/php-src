@@ -1999,6 +1999,17 @@ static bool zend_try_ct_eval_class_const(zval *zv, zend_string *class_name, zend
 	zend_class_constant *cc;
 	zval *c;
 
+	/* PHP Modules: never compile-time-fold a *module member* class constant — its name
+	 * carries a "::" boundary. Folding substitutes the value at compile time, bypassing
+	 * the runtime internal gate (which would otherwise deny e.g. `M::Internal::CONST`, or
+	 * a chained `A::PATH::CONST` whose middle const holds an internal type's name). By
+	 * declining to fold, resolution falls through to the ZEND_FETCH_CLASS_CONSTANT opcode,
+	 * which applies the boundary check with the correct runtime scope. Public members
+	 * still resolve — just at runtime rather than as a baked constant. */
+	if (strstr(ZSTR_VAL(class_name), "::") != NULL) {
+		return 0;
+	}
+
 	if (class_name_refers_to_active_ce(class_name, fetch_type)) {
 		cc = zend_hash_find_ptr(&CG(active_class_entry)->constants_table, name);
 	} else if (fetch_type == ZEND_FETCH_CLASS_DEFAULT && !(CG(compiler_options) & ZEND_COMPILE_NO_CONSTANT_SUBSTITUTION)) {
