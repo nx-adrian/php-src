@@ -1157,6 +1157,22 @@ static inheritance_status do_inheritance_check_on_method(
 			ZEND_FN_SCOPE_NAME(parent), ZSTR_VAL(child->common.function_name));
 	}
 
+	/* PHP Modules: an `internal` method is virtual WITHIN its module but sealed to the
+	 * outside. An external subclass may not override it — that would let outside code
+	 * replace, and so hijack, the module's own internal dispatch (its `$this->m()`).
+	 * A subclass inside the same module may override it normally (internal collaboration).
+	 * Mirrors `final`, but scoped to the module boundary rather than the class. */
+	if ((flags & ZEND_INHERITANCE_CHECK_PROTO)
+	 && UNEXPECTED(parent_flags & ZEND_ACC_MODULE_INTERNAL)
+	 && !zend_module_scope_allows(parent->common.scope, ce)) {
+		if (flags & ZEND_INHERITANCE_CHECK_SILENT) {
+			return INHERITANCE_ERROR;
+		}
+		zend_error_at_noreturn(E_COMPILE_ERROR, func_filename(child), func_lineno(child),
+			"Cannot override internal method %s::%s() from outside its module",
+			ZEND_FN_SCOPE_NAME(parent), ZSTR_VAL(child->common.function_name));
+	}
+
 	child_flags	= child->common.fn_flags;
 	/* You cannot change from static to non static and vice versa.
 	 */

@@ -1912,3 +1912,40 @@ Test `module_069`; playground `module-playground/audit/audit_t_ntier_autoload.ph
 suite green: 70 module tests, `Zend/tests` clean (only the pre-existing `arginfo_zpp_mismatch` failures),
 `tests/classes` (autoload) 283/283, opcache/preload, spl, reflection all clean. Only `zend_execute_API.c`
 changes.
+
+## `internal` methods are sealed to outside subclasses (E1)
+
+**Concern.** An `internal` method is `ZEND_ACC_PUBLIC` plus the internal marker, so for dispatch it
+is an ordinary *virtual* method. An external subclass of a public module class could therefore override
+an `internal` method, and the module's own `$this->m()` would then dispatch to that external override —
+letting outside code hijack the module's internal control flow. (`private` methods don't have this: they
+are non-virtual.) The *access* side was already private-style — `parent::` to an internal method is
+denied and `module::` is unwriteable outside — but the *override* side was protected-style.
+
+**Fix — final to the outside, virtual inside.** In `do_inheritance_check_on_method` (beside the
+"Cannot override final method" check), reject overriding an `internal` method when the overriding class
+is not in the method's module:
+```c
+if (CHECK_PROTO && (parent->fn_flags & ZEND_ACC_MODULE_INTERNAL)
+        && !zend_module_scope_allows(parent->common.scope, ce)) {
+    error("Cannot override internal method %s::%s() from outside its module");
+}
+```
+An in-module subclass may still override it (legitimate internal collaboration); an external subclass
+cannot (no hijack). This lands at the shared inheritance-check site, so it covers direct extends,
+multi-level external hierarchies, and a trait supplying the override — all rejected — while public-method
+overrides and non-overriding external subclasses are untouched. `final internal` still errors first
+(final takes precedence). Net: an internal method is now genuinely private-facing to the outside (cannot
+be called *or* replaced from outside) yet remains a normal virtual method within its module.
+
+One nuance vs. true `private`: like `final`, the seal means an external subclass cannot declare a
+same-named method *at all* — marginally stricter than `private`, which would allow an unrelated separate
+`f()`. Matching `private` exactly would need non-virtual dispatch keyed on module scope (a much larger
+change); the seal delivers the security property without it.
+
+**Verified:** external override (direct, deep, trait-supplied) rejected; in-module override virtual;
+external non-override, public-method override, `parent::` denial, `final internal`, and `module::`
+inaccessibility all unchanged. Tests `module_070` (seal) and `module_071` (virtual-inside / not
+over-restricted); playground `module-playground/audit/audit_u_internal_method_seal.php`. Full suite
+green: 73 module tests, `Zend/tests` clean (only the pre-existing `arginfo_zpp_mismatch` failures),
+traits/classes/reflection clean. Only `zend_inheritance.c` changes.
