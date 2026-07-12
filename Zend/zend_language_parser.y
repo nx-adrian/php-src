@@ -1584,14 +1584,19 @@ module_member_inner:
 			/* PHP Modules: a body-less claim of a NESTED MODULE — the enclosing module
 			 * forward-declares "Inner" (defined in its own file). A MODULE node with a
 			 * NULL member list distinguishes it from the block form above. */
-	|	member_visibility namespace_declaration_name ';'
+	|	member_visibility namespace_name ';'
 			{ zend_ast *c = zend_ast_create(ZEND_AST_MODULE_CLAIM, $2);
 			  $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, c); }
 			/* PHP Modules: a body-less "claim" — the definition block forward-declares a
 			 * split-file member by name (and visibility); the body lives in a membership
 			 * file. A qualified name (Auth\PasswordChecker) is permitted, matching a
 			 * sub-file that declares the class under an internal namespace. The member's
-			 * kind (class/interface/…) is taken from the body when it is compiled. */
+			 * kind (class/interface/…) is taken from the body when it is compiled.
+			 * The name uses `namespace_name` (T_STRING | T_NAME_QUALIFIED), i.e. the same
+			 * space a real declaration can occupy — NOT `namespace_declaration_name`, which
+			 * also admits `semi_reserved` words. A claim like `internal public;` names a
+			 * member that could never be defined (`class public {}` is illegal), so it is
+			 * rejected here rather than accepted as a claim that can never bind. */
 ;
 
 /* PHP Modules (experimental): a module-qualified class reference,

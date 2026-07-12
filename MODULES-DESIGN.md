@@ -1661,3 +1661,22 @@ outside a namespace block is still rejected in either order). Guardrails intact:
 *wrapped* by a namespace (unbracketed `namespace A; module …` or bracketed
 `namespace A { module … }`) is still "must be in the root namespace". The module always
 registers at its canonical root (X\Y::C, not A\X\Y::C), order-independent. Test module_058.
+
+## Claim names restricted to the declarable name space (bug fix)
+
+A body-less claim (`visibility Name;`) forward-declares a split-file member. Its name was
+parsed as `namespace_declaration_name` (→ `identifier` → `T_STRING | semi_reserved`), so a
+`semi_reserved` word was wrongly accepted: `internal public;`, `internal list;`, and
+`public readonly;` all parsed. Those names can never be *defined* — declaration names are
+`T_STRING`, so `class public {}` / `class list {}` are themselves illegal — meaning such a
+claim could never bind to anything.
+
+Fix: the claim production now uses `namespace_name` (`T_STRING | T_NAME_QUALIFIED`), i.e. the
+same name space a real class/interface/trait/enum declaration occupies. Claiming a
+semi_reserved name is now a parse error (test: module_059). Grammar stays at `%expect 0`
+(verified with bison 3.8.2).
+
+This is an independent correctness fix, but it also removes the one shift/reduce hazard that
+would otherwise surface when member visibility is made optional: a nullable `member_visibility`
+makes `public` ambiguous between the visibility keyword and a claim *named* `public`, and that
+ambiguity only exists because claims accepted `semi_reserved` names in the first place.
