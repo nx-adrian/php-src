@@ -118,6 +118,9 @@ typedef struct _zend_file_context {
 	 * scope for the current file, or NULL. Module-owned symbols are prefixed with
 	 * "<module>::" (the module boundary), then namespace-prefixed with "\" as usual. */
 	zend_string *current_module;
+	/* PHP Modules: transient — true while compiling an `internal` module member, so
+	 * zend_compile_class_decl can stamp ZEND_ACC2_MODULE_INTERNAL onto the member CE. */
+	bool current_member_internal;
 
 	HashTable *imports;
 	HashTable *imports_function;
@@ -385,10 +388,14 @@ typedef struct _zend_oparray_context {
 /* Class cannot be serialized or unserialized             |     |     |     */
 #define ZEND_ACC_NOT_SERIALIZABLE        (1 << 29) /*  X  |     |     |     */
 /*                                                        |     |     |     */
-/* Class Flags 2 (ce_flags2) (unused: 0-31)               |     |     |     */
+/* Class Flags 2 (ce_flags2) (unused: 1-31)               |     |     |     */
 /* =========================                              |     |     |     */
 /*                                                        |     |     |     */
-/* #define ZEND_ACC2_EXAMPLE             (1 << 0)      X  |     |     |     */
+/* PHP Modules (experimental): this class is an `internal` member of its module   */
+/* (a member class keyed "Module::Name" declared internal). Lives in ce_flags2 so  */
+/* it rides the persisted/preloaded class entry — the CE-resident source of truth  */
+/* for internal-ness, replacing the per-request module registry roster at runtime. */
+#define ZEND_ACC2_MODULE_INTERNAL        (1 << 0) /*   X  |     |     |     */
 /*                                                        |     |     |     */
 /* Function Flags (unused: none — 30 now ZEND_ACC_MODULE_INTERNAL)         */
 /* ==============                                         |     |     |     */

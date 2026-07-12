@@ -809,3 +809,38 @@ compile and runtime, with the strict_types bit collision fixed. Remaining module
 roadmap items are unrelated to `internal`: chained `::` (C6 → nested modules C7,
 `Module::Class::member`), preload persistence, and the forward-declaration/claim
 membership handshake.
+
+## Preload persistence — migrate module metadata onto class entries (approach B)
+
+**Problem.** The registry (`EG(module_registry)`) is per-request, populated by the
+runtime `ZEND_DECLARE_MODULE` op. Preloaded files execute once at startup and their
+op_array body does not re-run per request, so the op never fires and the per-request
+registry is empty for preloaded modules — internal enforcement inverts, ReflectionModule
+fails, tier-1 autoload misfires. The increment-10 opcode fix cannot help (the opcode
+doesn't run). Fix: move the *runtime* source of truth off the side registry and onto the
+class entries, which opcache/preload already persist.
+
+**Verification (done): CE-resident info is sufficient for every runtime consumer.**
+- Object-handler gates (methods, static+instance props): already CE-resident
+  (`zend_module_scope_allows` on CE names/flags). No change.
+- `zend_module_runtime_access_denied` (class fetch): member internal-ness + caller
+  module → member-CE flag + scope name prefix.
+- Tier-1 autoload ("is module M loaded"): existence of the module's backing class
+  (needs P2: always-create backing class).
+- ReflectionModule: backing CE + member-CE flags + class-table scan for enumeration.
+- Compile-time consumers (`zend_module_member_is_hidden`, `module::Member` gate) run
+  during compilation (once, at preload for preloaded files) — not broken by preload;
+  they can stay on a transient compile-time registry.
+
+**P1 (done).** `ZEND_ACC2_MODULE_INTERNAL` (ce_flags2 bit 0) — a member class declared
+`internal` carries it on its persisted CE. Set via a transient `FC(current_member_internal)`
+signal read in `zend_compile_class_decl` (the RTD key can't be reconstructed post-compile
+— it embeds a monotonic counter — so a compile-context signal is used instead).
+`zend_module_runtime_access_denied` now takes the already-fetched `ce` and checks the
+flag via `zend_module_scope_allows` — no registry lookup. 29 module + 327 class/autoload/
+ns tests green.
+
+**Remaining:** P2 always-create backing class + migrate tier-1 autoload and
+ReflectionModule-exists to backing-class existence; P3 migrate ReflectionModule
+enumeration/visibility to CE data, make the registry compile-time-only, then build with
+preload and verify a preloaded module enforces per request.
