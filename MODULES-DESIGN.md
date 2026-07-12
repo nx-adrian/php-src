@@ -1175,3 +1175,53 @@ boundary is enforced only when the imported name is actually used from outside t
 **Verified:** default and explicit aliases; namespaced module name (`VendorName\User::Profile`);
 chained nested import; alias in type hints and `instanceof`; internal import allowed but access
 denied. Test module_037. 39 module + 151 module/namespace regressions green.
+
+---
+
+## Increment: forward-declaration / "claim" membership model (Feature 4)
+
+**Goal:** let a module be split across files where the definition file *claims* a member by
+name + visibility and a membership sub-file provides the body. This is the only way to give a
+split-file member `internal` visibility, since a plain `class` has no visibility keyword.
+
+**Grammar (`zend_language_parser.y`):** a body-less claim in the module block —
+`member_visibility namespace_declaration_name ';'` — producing `ZEND_AST_MODULE_CLAIM` (new
+1-child AST kind) wrapped in `ZEND_AST_MODULE_MEMBER`. Conflict-free (`%expect 0` holds).
+
+**SYNTAX DIVERGENCE FROM THE RFC (flag for review).** The RFC spec writes claims *with* the
+type keyword and a qualified name: `internal class Auth\PasswordChecker;`. The keyword'd form
+hits an LALR(1) shift/reduce conflict: each type-declaration statement inserts a mid-rule
+action `{ $<num>$ = CG(zend_lineno); }` right after `T_CLASS`/`T_INTERFACE`/…, and the claim's
+name (`namespace_declaration_name`) competes with that ε-reduction on the `identifier`
+lookahead. The PoC therefore uses the **keyword-less** form `internal Auth\PasswordChecker;`
+(name + visibility; the kind is taken from the body). Matching the spec's keyword'd syntax
+needs a grammar refactor (a shared body-optional declaration form that also accepts a qualified
+name in module context) — deferred. Qualified names ARE supported by the keyword-less form.
+
+**Claim registration (`zend_compile.c`, `zend_compile_module`):** in the member loop, a
+`ZEND_AST_MODULE_CLAIM` records its canonical name -> visibility in `mod->members` and in the
+persisted `roster` (which rides the `ZEND_DECLARE_MODULE` op, so opcache restores it). No class
+entry is created — the body lives elsewhere.
+
+**Visibility reconciliation (`zend_compile.c`, `zend_compile_class_decl`):** when a class is
+compiled under a `module M;` membership file and is NOT already flagged by the block-form
+signal, it looks its own canonical name up in `M`'s claim table; a claim of `internal` stamps
+`ZEND_ACC2_MODULE_INTERNAL` on the CE (persisted like any class flag). The claim is the single
+source of truth for a split-file member's visibility. Unclaimed symbols find no entry and stay
+public (the agreed "unclaimed = reachable, no error" scope).
+
+**Ordering / handshake.** Reconciliation is at compile time and needs the claims present when
+the body compiles. The two-tier autoloader guarantees this: tier-1 loads the module definition
+(claims) before tier-2 loads the membership body. A manual out-of-order `require` of a body
+before its definition is the one case where the internal flag would not be applied — a
+documented limitation (a full runtime/link-time reconciliation would close it; compile-time
+autoload is impossible because the engine forbids autoload during compilation).
+
+**Verified (module_038):** inline member + `public GuestUser;` claim (body reachable) +
+`internal Auth\PasswordChecker;` claim (body inherits internal — denied from outside, allowed
+from a sibling inside the module). 39 module + 436 module/ns/class regressions green.
+
+**Feature-4 scope still open (deferred):** unclaimed-symbol *gating* (making unclaimed
+`M::X` unreachable) — the user deprioritized this; kind-mismatch detection (claim says
+interface, body is a class); the keyword'd claim syntax; out-of-order-require reconciliation;
+true file-private isolation.

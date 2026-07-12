@@ -9839,6 +9839,23 @@ static void zend_compile_class_decl(znode *result, const zend_ast *ast, bool top
 	 * (a top-level module's backing class is compiled with the signal cleared). */
 	if (FC(current_member_internal)) {
 		ce->ce_flags2 |= ZEND_ACC2_MODULE_INTERNAL;
+	} else if (FC(current_module) && !(decl->flags & ZEND_ACC_MODULE)) {
+		/* Split-file membership body: a class declared under "module M;" inherits the
+		 * visibility M claimed for it (public/internal). The claim, registered in the
+		 * module's member table by its canonical name, is the single source of truth
+		 * for a split-file member's visibility (a plain `class` has no visibility
+		 * keyword). Unclaimed symbols simply find no entry and stay public. */
+		zend_string *lc_member = zend_string_tolower(ce->name);
+		zend_string *lc_mod = zend_string_tolower(FC(current_module));
+		zend_php_module *m = zend_lookup_module(lc_mod);
+		if (m) {
+			void *vis = zend_hash_find_ptr(&m->members, lc_member);
+			if (vis && (uintptr_t) vis == ZEND_MODULE_MEMBER_INTERNAL) {
+				ce->ce_flags2 |= ZEND_ACC2_MODULE_INTERNAL;
+			}
+		}
+		zend_string_release(lc_member);
+		zend_string_release(lc_mod);
 	}
 	ce->info.user.filename = zend_string_copy(zend_get_compiled_filename());
 	ce->info.user.line_start = decl->start_lineno;
@@ -10544,6 +10561,26 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 			ZEND_ASSERT(member->kind == ZEND_AST_MODULE_MEMBER);
 			uint32_t visibility = member->attr;
 			zend_ast *decl = member->child[0];
+
+			/* A body-less claim ("public GuestUser;", "internal Auth\PasswordChecker;"):
+			 * record membership + visibility only. No class entry is created here; the
+			 * real declaration lives in a membership sub-file and inherits this visibility
+			 * when it compiles (zend_compile_class_decl looks the claim up by canonical
+			 * name). The name may be namespaced, matching a sub-file's internal namespace. */
+			if (decl->kind == ZEND_AST_MODULE_CLAIM) {
+				zend_string *simple = zend_ast_get_str(decl->child[0]);
+				zend_string *canonical = zend_string_concat3(
+					ZSTR_VAL(name), ZSTR_LEN(name), "::", 2,
+					ZSTR_VAL(simple), ZSTR_LEN(simple));
+				zend_string *lc = zend_string_tolower(canonical);
+				zend_hash_update_ptr(&mod->members, lc, (void*)(uintptr_t) visibility);
+				zval vzv;
+				ZVAL_LONG(&vzv, (zend_long) visibility);
+				zend_hash_update(roster, lc, &vzv);
+				zend_string_release(canonical);
+				zend_string_release(lc);
+				continue;
+			}
 
 			/* Module-level constants become class constants of the backing class,
 			 * not global constants. Collect them as class-const groups; they are
