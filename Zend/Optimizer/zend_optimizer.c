@@ -892,6 +892,13 @@ const zend_class_constant *zend_fetch_class_const_info(
 		|| ((ZEND_CLASS_CONST_FLAGS(const_info) & ZEND_ACC_PPP_MASK) != ZEND_ACC_PUBLIC && const_info->ce != op_array->scope)) {
 		return NULL;
 	}
+	/* PHP Modules: a module-internal constant is public at the class level but must
+	 * not be folded into code outside its module (that would bypass the runtime gate,
+	 * e.g. when the const's class is preloaded/immutable). */
+	if ((ZEND_CLASS_CONST_FLAGS(const_info) & ZEND_ACC_MODULE_INTERNAL_MEMBER)
+		&& !zend_module_scope_allows(const_info->ce, op_array->scope)) {
+		return NULL;
+	}
 	*is_prototype = is_static_reference
 		&& !(const_info->ce->ce_flags & ZEND_ACC_FINAL) && !(ZEND_CLASS_CONST_FLAGS(const_info) & ZEND_ACC_FINAL);
 
