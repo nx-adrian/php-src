@@ -892,3 +892,44 @@ compile time. The `ZEND_DECLARE_MODULE` opcode + per-request registry rebuild ar
 longer read at runtime and could be removed as a later cleanup (left in as a harmless
 compile-time/non-preload convenience for now). 31 module + reflection/optimizer/const
 suites green.
+
+## Chained "::" (C6) — empirical finding: needs dedicated grammar design, not a rule add
+
+Goal: `Module::Class::member` (static method/const/prop on a *member class*), and later
+`X::Y::Z` for nested modules (C7). Today `Vendor\App::Service::make()` misparses —
+`Vendor\App::Service` is taken as a backing-class *constant* fetch ("Undefined constant
+Vendor\App::Service"), not as the member class whose method is `make`.
+
+**Tried the obvious thing and measured it:** adding
+`module_qualified_name T_PAAMAYIM_NEKUDOTAYIM member_name argument_list` (and the const/
+prop analogues) as the static-access class. Result from bison: **1 shift/reduce + 38
+reduce/reduce conflicts.** Root cause: `module_qualified_name` is `name '::' name`, which
+overlaps the existing `class_name '::' member_name|identifier|simple_variable` rules —
+at `A '::' B` with lookahead `::`, the parser cannot decide (within LALR(1)) between
+reducing `A::B` as a class-constant/static access and continuing a chain. Reverted;
+grammar is back to `%expect 0`. This confirms the recommendations-doc prediction that
+chained `::` "needs engine-level reinterpretation of the existing parse tree, not new
+grammar."
+
+**Not blocking:** the workarounds are clean — inside a module use bare `Class::method()`
+(module-relative, works today); outside use `use Vendor\App::Service; Service::method()`
+or `$x = new Vendor\App::Service(); $x::method()`. C6 is an ergonomics/completeness gap,
+not a functional blocker.
+
+**Viable approaches for a dedicated pass (in preference order):**
+1. *Shared-prefix sibling rules* (the increment-7 technique, extended): inline the
+   chained forms so they share the `class_name '::'` left prefix with the existing
+   single-`::` rules, and branch only on the token *after* the segment (`(` → method,
+   `::` → deeper chain, `$` → static prop). The overlap to resolve is `member_name`
+   vs `name` vs `identifier` after `class_name '::'`; drive it to zero with
+   `bison -Wcounterexamples`. Highest chance of `%expect 0`, most fiddly.
+2. *Parse-tree reinterpretation*: allow `class_const '::' member` to parse into a nested
+   tree `(A::B)::C`, then in the compiler detect when the inner node resolves to a
+   module-qualified class name and rewrite it as the class. Fewer grammar rules, but
+   moves complexity into zend_compile.c and still needs a non-conflicting chaining rule.
+3. *Nested-module unification*: since C7 also needs `X::Y::Z`, design the multi-segment
+   name once (a segment-list node) with the "module = everything before the last `::`"
+   resolution rule, used uniformly by class-reference and static-access positions.
+
+Recommend (1) or (3) as a focused increment with conflict-counterexample iteration —
+not a tail-end addition. Everything else on the branch remains green (`%expect 0`).
