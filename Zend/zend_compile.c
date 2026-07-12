@@ -9840,17 +9840,20 @@ static void zend_compile_class_decl(znode *result, const zend_ast *ast, bool top
 	if (FC(current_member_internal)) {
 		ce->ce_flags2 |= ZEND_ACC2_MODULE_INTERNAL;
 	} else if (FC(current_module) && !(decl->flags & ZEND_ACC_MODULE)) {
-		/* Split-file membership body: a class declared under "module M;" inherits the
-		 * visibility M claimed for it (public/internal). The claim, registered in the
-		 * module's member table by its canonical name, is the single source of truth
-		 * for a split-file member's visibility (a plain `class` has no visibility
-		 * keyword). Unclaimed symbols simply find no entry and stay public. */
+		/* Split-file membership body: a class declared under "module M;" takes its
+		 * visibility from the module's claim table (keyed by canonical name), the only
+		 * place a split-file member's visibility can be written (a plain `class` has no
+		 * visibility keyword). Visibility is internal *by default*: an unclaimed symbol
+		 * (no entry) is module-internal, so exposing a split-file member publicly
+		 * requires an explicit `public` claim. Only a `public` claim keeps it public;
+		 * `internal` and "no claim" both mark it internal. Unclaimed symbols are also
+		 * never registered as members, so `module::Name` cannot resolve them. */
 		zend_string *lc_member = zend_string_tolower(ce->name);
 		zend_string *lc_mod = zend_string_tolower(FC(current_module));
 		zend_php_module *m = zend_lookup_module(lc_mod);
 		if (m) {
 			void *vis = zend_hash_find_ptr(&m->members, lc_member);
-			if (vis && (uintptr_t) vis == ZEND_MODULE_MEMBER_INTERNAL) {
+			if (!vis || (uintptr_t) vis == ZEND_MODULE_MEMBER_INTERNAL) {
 				ce->ce_flags2 |= ZEND_ACC2_MODULE_INTERNAL;
 			}
 		}

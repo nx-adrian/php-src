@@ -12,6 +12,7 @@ module Vendor\User {
     public class Profile {
         public function __construct(public string $name = "anon") {}
     }
+    public Auth\PasswordChecker;   // claim the split-file member public so it is reachable from outside
 }
 PHP);
 
