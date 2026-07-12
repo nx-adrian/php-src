@@ -1839,7 +1839,11 @@ ZEND_API void zend_do_inheritance_ex(zend_class_entry *ce, zend_class_entry *par
 		if (UNEXPECTED(!(parent_ce->ce_flags & ZEND_ACC_INTERFACE))) {
 			zend_error_noreturn(E_COMPILE_ERROR, "Interface %s cannot extend class %s", ZSTR_VAL(ce->name), ZSTR_VAL(parent_ce->name));
 		}
-	} else if (UNEXPECTED(parent_ce->ce_flags & (ZEND_ACC_INTERFACE|ZEND_ACC_TRAIT|ZEND_ACC_FINAL|ZEND_ACC_ENUM))) {
+	} else if (UNEXPECTED(parent_ce->ce_flags & (ZEND_ACC_INTERFACE|ZEND_ACC_TRAIT|ZEND_ACC_FINAL|ZEND_ACC_ENUM|ZEND_ACC_MODULE))) {
+		/* PHP Modules: a module's backing class is not a base class */
+		if (parent_ce->ce_flags & ZEND_ACC_MODULE) {
+			zend_error_noreturn(E_COMPILE_ERROR, "Class %s cannot extend module %s", ZSTR_VAL(ce->name), ZSTR_VAL(parent_ce->name));
+		}
 		/* Class must not extend an enum (GH-16315); check enums first since
 		 * enums are implemented as final classes */
 		if (parent_ce->ce_flags & ZEND_ACC_ENUM) {

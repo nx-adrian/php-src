@@ -155,6 +155,9 @@ ZEND_API zend_php_module *zend_lookup_module(zend_string *lc_name);
  * DECLARE_MODULE opline. Runs every request, including opcache cache hits where
  * the compiler never ran, so the per-request registry is always rebuilt. */
 ZEND_API void zend_declare_module_runtime(zend_string *name, HashTable *members);
+/* True if class scope `scope` may access an internal member declared in `member_ce`
+ * (same-module check). Used for internal methods and internal backing-class members. */
+ZEND_API bool zend_module_scope_allows(const zend_class_entry *member_ce, const zend_class_entry *scope);
 ZEND_API zend_ast *zend_ast_create_module_qualified_name(zend_ast *module_ast, zend_ast *member_ast);
 /* "module::Member": a class-like reference to a member of the current module,
  * resolved at compile time against FC(current_module). */
@@ -313,6 +316,10 @@ typedef struct _zend_oparray_context {
 #define ZEND_ACC_TRAIT                   (1 <<  1) /*  X  |     |     |     */
 #define ZEND_ACC_ANON_CLASS              (1 <<  2) /*  X  |     |     |     */
 #define ZEND_ACC_ENUM                    (1 << 28) /*  X  |     |     |     */
+/* PHP Modules (experimental): the synthetic non-instantiable backing class that
+ * holds a module's static members (constants/functions/properties). Uses the free
+ * class-flag bit 31. */
+#define ZEND_ACC_MODULE                  (1u << 31) /* X  |     |     |     */
 /*                                                        |     |     |     */
 /* Class linked with parent, interfaces and traits        |     |     |     */
 #define ZEND_ACC_LINKED                  (1 <<  3) /*  X  |     |     |     */
@@ -478,7 +485,8 @@ static zend_always_inline uint32_t zend_visibility_to_set_visibility(uint32_t vi
 	ZEND_ACC_TRAIT |                    \
 	ZEND_ACC_IMPLICIT_ABSTRACT_CLASS |  \
 	ZEND_ACC_EXPLICIT_ABSTRACT_CLASS |  \
-	ZEND_ACC_ENUM                       \
+	ZEND_ACC_ENUM |                     \
+	ZEND_ACC_MODULE                     \
 )
 
 #define ZEND_SHORT_CIRCUITING_CHAIN_MASK 0x3

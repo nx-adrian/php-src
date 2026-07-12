@@ -1941,21 +1941,44 @@ ZEND_API ZEND_COLD zend_never_inline void zend_abstract_method_call(const zend_f
 /* PHP Modules: does the caller (scope) belong to the same module as a class that
  * declares an "internal" method? The module is the "<module>::" prefix of the
  * class name; a caller with no module, or a different module, is denied. */
-static zend_always_inline bool zend_module_scope_allows(
+/* Is `scope` (the caller's class scope) inside the same module as `member_ce`
+ * (the declaring class of an internal member)? A class belongs to a module either
+ * because it is the module's own backing class (ZEND_ACC_MODULE — its name IS the
+ * module name) or because it is a member class keyed "Module::Name" (module = the
+ * part before "::"). Both member classes and backing-class members route here. */
+ZEND_API bool zend_module_scope_allows(
 		const zend_class_entry *member_ce, const zend_class_entry *scope)
 {
-	const char *mval = ZSTR_VAL(member_ce->name);
-	const char *msep = zend_memnstr(mval, "::", 2, mval + ZSTR_LEN(member_ce->name));
-	if (!msep) {
-		return true; /* declaring class is not in a module — nothing to gate */
+	const char *mval;
+	size_t mlen;
+	if (member_ce->ce_flags & ZEND_ACC_MODULE) {
+		mval = ZSTR_VAL(member_ce->name);
+		mlen = ZSTR_LEN(member_ce->name);
+	} else {
+		mval = ZSTR_VAL(member_ce->name);
+		const char *msep = zend_memnstr(mval, "::", 2, mval + ZSTR_LEN(member_ce->name));
+		if (!msep) {
+			return true; /* declaring class is not in a module — nothing to gate */
+		}
+		mlen = (size_t)(msep - mval);
 	}
 	if (!scope) {
 		return false;
 	}
-	size_t mlen = (size_t)(msep - mval);
-	const char *sval = ZSTR_VAL(scope->name);
-	const char *ssep = zend_memnstr(sval, "::", 2, sval + ZSTR_LEN(scope->name));
-	if (!ssep || (size_t)(ssep - sval) != mlen) {
+	const char *sval;
+	size_t slen;
+	if (scope->ce_flags & ZEND_ACC_MODULE) {
+		sval = ZSTR_VAL(scope->name);
+		slen = ZSTR_LEN(scope->name);
+	} else {
+		sval = ZSTR_VAL(scope->name);
+		const char *ssep = zend_memnstr(sval, "::", 2, sval + ZSTR_LEN(scope->name));
+		if (!ssep) {
+			return false;
+		}
+		slen = (size_t)(ssep - sval);
+	}
+	if (slen != mlen) {
 		return false;
 	}
 	return zend_binary_strncasecmp(sval, mlen, mval, mlen, mlen) == 0;
