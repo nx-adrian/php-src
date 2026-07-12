@@ -2329,6 +2329,17 @@ ZEND_API zend_function *zend_std_get_constructor(zend_object *zobj) /* {{{ */
 				zend_object_store_ctor_failed(zobj);
 				constructor = NULL;
 			}
+		} else if (UNEXPECTED(constructor->common.fn_flags & ZEND_ACC_MODULE_INTERNAL)) {
+			/* PHP Modules: a public class with an `internal` constructor is visible
+			 * everywhere but instantiable only from inside its module. */
+			const zend_class_entry *scope = get_fake_or_executed_scope();
+			if (!zend_module_scope_allows(constructor->common.scope, scope)) {
+				zend_throw_error(NULL,
+					"Cannot instantiate class %s via internal constructor from outside its module",
+					ZSTR_VAL(zobj->ce->name));
+				zend_object_store_ctor_failed(zobj);
+				constructor = NULL;
+			}
 		}
 	}
 
