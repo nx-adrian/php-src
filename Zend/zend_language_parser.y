@@ -1526,6 +1526,10 @@ module_member:
 				  zend_ast_get_str($5), $8, NULL, $12, $10, NULL);
 			  CG(extra_fn_flags) = $11;
 			  $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, m); }
+	|	member_visibility T_STATIC optional_type_without_static property_list ';'
+			{ zend_ast *p = zend_ast_create(ZEND_AST_PROP_GROUP, $3, $4, NULL);
+			  p->attr = ZEND_ACC_PUBLIC | ZEND_ACC_STATIC;
+			  $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, p); }
 ;
 
 /* PHP Modules (experimental): a module-qualified class reference,
@@ -1667,6 +1671,9 @@ simple_variable:
 static_member:
 		class_name T_PAAMAYIM_NEKUDOTAYIM simple_variable
 			{ $$ = zend_ast_create(ZEND_AST_STATIC_PROP, $1, $3); }
+	|	T_MODULE T_PAAMAYIM_NEKUDOTAYIM simple_variable
+			{ $$ = zend_ast_create(ZEND_AST_STATIC_PROP, zend_ast_create_module_backing_name(), $3); }
+			/* PHP Modules: "module::$x" self-reference to a backing-class static property. */
 	|	variable_class_name T_PAAMAYIM_NEKUDOTAYIM simple_variable
 			{ $$ = zend_ast_create(ZEND_AST_STATIC_PROP, $1, $3); }
 ;
