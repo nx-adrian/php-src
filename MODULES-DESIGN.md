@@ -1726,3 +1726,19 @@ class fell through and reported `true` — even though `new M` fatals with "Cann
 module" (the engine `new` guard keys off ZEND_ACC_UNINSTANTIABLE, which a module carries).
 Added ZEND_ACC_MODULE to both flag checks so reflection agrees with the engine. Member
 classes are unaffected. Test: module_063.
+
+## `internal` is semi-reserved (like public/private/readonly), not fully reserved
+
+`internal` had been placed only in `member_modifier`, making it MORE reserved than the other
+visibility words: `public`/`private`/`readonly` also sit in `semi_reserved`, so they can be used
+as member names (`function public() {}`, `const private`, …), but `internal` could not. The
+earlier rationale — that a semi-reserved treatment is impossible because trait aliasing yields an
+irresolvable reduce/reduce conflict — does not hold: the trait-alias rename target is `T_STRING`,
+not `identifier`/`semi_reserved`, so a modifier keyword can never be a rename target there.
+
+Adding `T_INTERNAL` to `semi_reserved` builds at `%expect 0` (verified with bison) and lets
+`internal` be used as a method / constant / property / enum-case name while still working as the
+module visibility modifier — structurally identical to public/private/readonly. Only module_004
+needed updating (it asserted the old fully-reserved behavior). This narrows the keyword's BC break
+to just top-level declaration names (class/interface/trait/enum/function/const), matching the RFC's
+intent that `internal` be "on par with public/private".
