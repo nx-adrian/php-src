@@ -1422,7 +1422,8 @@ prefixes the current module).
   buffer; result is never longer), so `Outer::Inner::Gadget` -> `Outer\Inner\Gadget`. Tier-1
   still autoloads the outermost segment (`Outer`) — correct, because a nested module's
   definition lives inside its outer module's definition file, so loading `Outer` loads
-  `Inner`'s claims too.
+  `Inner`'s claims too. **[Superseded — this assumption is false when a nested module is
+  SPLIT into its own file; fixed by n-tier autoload, see the section below.]**
 - `zend_compile_module`: chained file-level membership (`module Outer; module Inner;`) leaked
   the superseded `FC(current_module)` ("Outer"); it is now released when the next membership
   overwrites it. (An earlier draft added a literal `module Outer::Inner;` statement; removed —
@@ -1881,3 +1882,33 @@ internal-member identity-ungated/use-denied; playground audits `audit_r` (namesp
 pre-fix) and `audit_s` (const-chain interactions, non-regression guard). Full suite green: 68 module
 tests, `Zend/tests` clean (only the pre-existing `arginfo_zpp_mismatch` failures), reflection/spl clean;
 the const-chain corpus is identical to the pre-fix engine.
+
+## n-tier autoload for split nested modules (B2)
+
+**Bug.** The module boundary `::` composes to any depth, and the spec lets a nested module be *split
+into its own file*: the parent claims `public module Inner;` and `Inner` is defined separately as
+`module Outer::Inner { … }` (its members inline, or claimed and split again). Reaching
+`Outer::Inner::Member` by autoload failed: the resolver split at the **first** `::`, loaded only the
+outermost module (`Outer`), then jumped straight to the member sub-file (`Outer\Inner\Member`). The
+intermediate level `Outer::Inner` — whose file holds the member's claim (or the member's inline body) —
+was never loaded. So the member came out either wrongly `internal` (claimed+split: its `public` claim,
+living in `Outer::Inner`'s file, was absent, so it took the unclaimed default) or **not found**
+(inline-in-nested-def: the body lives in `Outer::Inner`'s file, not `Outer\Inner\Member.php`). The
+earlier note above assumed a nested module is always defined inline in its parent — true for that
+layout, false for a split one.
+
+**Fix — generalize two-tier to n-tier** (`zend_lookup_class_ex`). Walk every `::` boundary and load the
+prefix before each one as a module, **outermost first** (a nested module's visibility reconciles against
+its parent's claim, so the parent must load first): for `Outer::Inner::Member`, load `Outer` (bare name),
+then `Outer::Inner` (autoloaded as `Outer\Inner`), then the member `Outer\Inner\Member`. It handles both
+layouts uniformly — after a level loads, the member may already be defined inline (no sub-file fetch
+needed) or its claim is now present (so its split body compiles with the right visibility). If any level
+autoloads to a non-module (or misses), resolution stops and falls through to the normal "class not found"
+path unchanged, so non-module `A::B::C` names and ordinary autoload are untouched. Composer/PSR-4 needs
+no change: it still only ever sees `Outer`, `Outer\Inner`, `Outer\Inner\Member`.
+
+**Verified:** both layouts and 3-level nesting resolve cold; `internal` split-nested members stay denied.
+Test `module_069`; playground `module-playground/audit/audit_t_ntier_autoload.php` (fails pre-fix). Full
+suite green: 70 module tests, `Zend/tests` clean (only the pre-existing `arginfo_zpp_mismatch` failures),
+`tests/classes` (autoload) 283/283, opcache/preload, spl, reflection all clean. Only `zend_execute_API.c`
+changes.
