@@ -1250,3 +1250,31 @@ Separately, a membership file could not even declare `module Outer::Inner;` — 
 (internal, split-file) are denied from outside — the claim's visibility is applied because
 tier-1 loads the definition (claims) before tier-2 loads the body. 40 module + 396 ns/class
 regressions green.
+
+---
+
+## Increment: complete Reflection (RFC audit follow-up)
+
+**ReflectionModule** gained the methods the RFC lists beyond the original three:
+`getInterfaces`, `getEnums`, `getModules` (member class-likes partitioned by kind via a shared
+`reflection_module_list_kind` helper; `getClasses` no longer lumps interfaces/enums/nested
+modules in — traits still count as classes, there is no `getTraits`), `getFunctions` (the
+backing class's static methods, returned as callable `Module::fn` names), and `getConstants`
+(the backing class's constants as a name=>value map; reflection bypasses `internal`, so both
+public and internal appear).
+
+**isModuleInternal()** added to `ReflectionClass` (checks `ce_flags2 & ZEND_ACC2_MODULE_INTERNAL`),
+`ReflectionMethod` (`_function_check_flag` + `ZEND_ACC_MODULE_INTERNAL`), `ReflectionProperty`
+and `ReflectionClassConstant` (`ZEND_ACC_MODULE_INTERNAL_MEMBER`). Distinct from the existing
+`isInternal()` ("extension/core-defined"), per the RFC's naming note.
+
+**Stub caveat.** `gen_stub.php` cannot run in this environment (the `tokenizer` extension is
+unavailable — the same reason ReflectionModule was hand-registered). The stub source
+`php_reflection.stub.php` was updated with the four `isModuleInternal` declarations for
+PR-readiness, but the generated `php_reflection_arginfo.h` was hand-edited to match (function
+decls + `ZEND_ME` entries, reusing the no-arg bool arginfo). A normal build environment would
+regenerate it from the stub. Updated `ReflectionClass_toString_001` for the new method.
+
+**Verified (module_040):** every ReflectionModule accessor returns the correct partition;
+`isModuleInternal` is true for internal class/method/property/constant and false for public
+ones and for non-module symbols. 43 module + 508 reflection-suite tests green.

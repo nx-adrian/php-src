@@ -791,6 +791,7 @@ ZEND_METHOD(ReflectionMethod, isPrivate);
 ZEND_METHOD(ReflectionMethod, isProtected);
 ZEND_METHOD(ReflectionMethod, isAbstract);
 ZEND_METHOD(ReflectionMethod, isFinal);
+ZEND_METHOD(ReflectionMethod, isModuleInternal);
 ZEND_METHOD(ReflectionMethod, isConstructor);
 ZEND_METHOD(ReflectionMethod, isDestructor);
 ZEND_METHOD(ReflectionMethod, getClosure);
@@ -828,6 +829,7 @@ ZEND_METHOD(ReflectionClass, getReflectionConstant);
 ZEND_METHOD(ReflectionClass, getInterfaces);
 ZEND_METHOD(ReflectionClass, getInterfaceNames);
 ZEND_METHOD(ReflectionClass, isInterface);
+ZEND_METHOD(ReflectionClass, isModuleInternal);
 ZEND_METHOD(ReflectionClass, getTraits);
 ZEND_METHOD(ReflectionClass, getTraitNames);
 ZEND_METHOD(ReflectionClass, getTraitAliases);
@@ -883,6 +885,7 @@ ZEND_METHOD(ReflectionProperty, isPrivateSet);
 ZEND_METHOD(ReflectionProperty, isProtectedSet);
 ZEND_METHOD(ReflectionProperty, isStatic);
 ZEND_METHOD(ReflectionProperty, isReadOnly);
+ZEND_METHOD(ReflectionProperty, isModuleInternal);
 ZEND_METHOD(ReflectionProperty, isDefault);
 ZEND_METHOD(ReflectionProperty, isDynamic);
 ZEND_METHOD(ReflectionProperty, isAbstract);
@@ -913,6 +916,7 @@ ZEND_METHOD(ReflectionClassConstant, isPublic);
 ZEND_METHOD(ReflectionClassConstant, isPrivate);
 ZEND_METHOD(ReflectionClassConstant, isProtected);
 ZEND_METHOD(ReflectionClassConstant, isFinal);
+ZEND_METHOD(ReflectionClassConstant, isModuleInternal);
 ZEND_METHOD(ReflectionClassConstant, getModifiers);
 ZEND_METHOD(ReflectionClassConstant, getDeclaringClass);
 ZEND_METHOD(ReflectionClassConstant, getDocComment);
@@ -1093,6 +1097,7 @@ static const zend_function_entry class_ReflectionMethod_methods[] = {
 	ZEND_ME(ReflectionMethod, getPrototype, arginfo_class_ReflectionMethod_getPrototype, ZEND_ACC_PUBLIC)
 	ZEND_ME(ReflectionMethod, hasPrototype, arginfo_class_ReflectionMethod_hasPrototype, ZEND_ACC_PUBLIC)
 	ZEND_ME(ReflectionMethod, setAccessible, arginfo_class_ReflectionMethod_setAccessible, ZEND_ACC_PUBLIC|ZEND_ACC_DEPRECATED)
+	ZEND_ME(ReflectionMethod, isModuleInternal, arginfo_class_ReflectionFunctionAbstract_inNamespace, ZEND_ACC_PUBLIC)
 	ZEND_FE_END
 };
 
@@ -1161,6 +1166,7 @@ static const zend_function_entry class_ReflectionClass_methods[] = {
 	ZEND_ME(ReflectionClass, getNamespaceName, arginfo_class_ReflectionClass_getNamespaceName, ZEND_ACC_PUBLIC)
 	ZEND_ME(ReflectionClass, getShortName, arginfo_class_ReflectionClass_getShortName, ZEND_ACC_PUBLIC)
 	ZEND_ME(ReflectionClass, getAttributes, arginfo_class_ReflectionClass_getAttributes, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionClass, isModuleInternal, arginfo_class_ReflectionFunctionAbstract_inNamespace, ZEND_ACC_PUBLIC)
 	ZEND_FE_END
 };
 
@@ -1212,6 +1218,7 @@ static const zend_function_entry class_ReflectionProperty_methods[] = {
 	ZEND_ME(ReflectionProperty, isFinal, arginfo_class_ReflectionProperty_isFinal, ZEND_ACC_PUBLIC)
 	ZEND_ME(ReflectionProperty, isReadable, arginfo_class_ReflectionProperty_isReadable, ZEND_ACC_PUBLIC)
 	ZEND_ME(ReflectionProperty, isWritable, arginfo_class_ReflectionProperty_isWritable, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionProperty, isModuleInternal, arginfo_class_ReflectionFunctionAbstract_inNamespace, ZEND_ACC_PUBLIC)
 	ZEND_FE_END
 };
 
@@ -1233,6 +1240,7 @@ static const zend_function_entry class_ReflectionClassConstant_methods[] = {
 	ZEND_ME(ReflectionClassConstant, isDeprecated, arginfo_class_ReflectionClassConstant_isDeprecated, ZEND_ACC_PUBLIC)
 	ZEND_ME(ReflectionClassConstant, hasType, arginfo_class_ReflectionClassConstant_hasType, ZEND_ACC_PUBLIC)
 	ZEND_ME(ReflectionClassConstant, getType, arginfo_class_ReflectionClassConstant_getType, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionClassConstant, isModuleInternal, arginfo_class_ReflectionFunctionAbstract_inNamespace, ZEND_ACC_PUBLIC)
 	ZEND_FE_END
 };
 

@@ -8167,6 +8167,32 @@ ZEND_METHOD(ReflectionConstant, __toString)
 	RETURN_STR(smart_str_extract(&str));
 }
 
+/* PHP Modules (experimental): isModuleInternal() on the existing reflection targets.
+ * Distinct from isInternal() (which means "defined by an extension/core"). */
+ZEND_METHOD(ReflectionClass, isModuleInternal)
+{
+	reflection_object *intern;
+	zend_class_entry *ce;
+	ZEND_PARSE_PARAMETERS_NONE();
+	GET_REFLECTION_OBJECT_PTR(ce);
+	RETURN_BOOL(ce->ce_flags2 & ZEND_ACC2_MODULE_INTERNAL);
+}
+
+ZEND_METHOD(ReflectionMethod, isModuleInternal)
+{
+	_function_check_flag(INTERNAL_FUNCTION_PARAM_PASSTHRU, ZEND_ACC_MODULE_INTERNAL);
+}
+
+ZEND_METHOD(ReflectionProperty, isModuleInternal)
+{
+	_property_check_flag(INTERNAL_FUNCTION_PARAM_PASSTHRU, ZEND_ACC_MODULE_INTERNAL_MEMBER);
+}
+
+ZEND_METHOD(ReflectionClassConstant, isModuleInternal)
+{
+	_class_constant_check_flag(INTERNAL_FUNCTION_PARAM_PASSTHRU, ZEND_ACC_MODULE_INTERNAL_MEMBER);
+}
+
 /* {{{ PHP Modules (experimental): ReflectionModule
  * A self-contained reflection class (independent of the shared reflection_object
  * machinery) that introspects a declared module via the engine's module registry.
@@ -8237,23 +8263,114 @@ ZEND_METHOD(ReflectionModule, getName)
 	RETURN_STR_COPY(ce->name);
 }
 
+/* Member class-like kinds, used to partition getClasses / getInterfaces / getEnums /
+ * getModules. A "plain class" is anything that is not an interface, enum, or (nested)
+ * module — traits included, since there is no dedicated getTraits(). */
+typedef enum { RM_CLASS, RM_INTERFACE, RM_ENUM, RM_MODULE } reflection_module_kind;
+
+static void reflection_module_list_kind(zval *return_value, zend_class_entry *bce, reflection_module_kind kind)
+{
+	array_init(return_value);
+	if (!bce) { return; }
+
+	zend_string *mod_lc = zend_string_tolower(bce->name);
+	zend_string *key;
+	zval *val;
+	ZEND_HASH_MAP_FOREACH_STR_KEY_VAL(EG(class_table), key, val) {
+		if (!key || !reflection_module_key_is_member(key, mod_lc)) {
+			continue;
+		}
+		const zend_class_entry *m = Z_CE_P(val);
+		bool match;
+		switch (kind) {
+			case RM_MODULE:    match = (m->ce_flags & ZEND_ACC_MODULE) != 0; break;
+			case RM_INTERFACE: match = (m->ce_flags & ZEND_ACC_INTERFACE) != 0; break;
+			case RM_ENUM:      match = (m->ce_flags & ZEND_ACC_ENUM) != 0; break;
+			case RM_CLASS:
+			default:
+				match = (m->ce_flags & (ZEND_ACC_MODULE | ZEND_ACC_INTERFACE | ZEND_ACC_ENUM)) == 0;
+				break;
+		}
+		if (match) {
+			add_next_index_str(return_value, zend_string_copy(m->name));
+		}
+	} ZEND_HASH_FOREACH_END();
+	zend_string_release(mod_lc);
+}
+
 ZEND_METHOD(ReflectionModule, getClasses)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	reflection_module_list_kind(return_value, reflection_module_backing_ce(ZEND_THIS), RM_CLASS);
+}
+
+ZEND_METHOD(ReflectionModule, getInterfaces)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	reflection_module_list_kind(return_value, reflection_module_backing_ce(ZEND_THIS), RM_INTERFACE);
+}
+
+ZEND_METHOD(ReflectionModule, getEnums)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	reflection_module_list_kind(return_value, reflection_module_backing_ce(ZEND_THIS), RM_ENUM);
+}
+
+ZEND_METHOD(ReflectionModule, getModules)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	reflection_module_list_kind(return_value, reflection_module_backing_ce(ZEND_THIS), RM_MODULE);
+}
+
+/* Module-level static functions live as static methods on the backing class; return
+ * them as callable "Module::function" names. */
+ZEND_METHOD(ReflectionModule, getFunctions)
 {
 	ZEND_PARSE_PARAMETERS_NONE();
 	zend_class_entry *bce = reflection_module_backing_ce(ZEND_THIS);
 	array_init(return_value);
 	if (!bce) { return; }
 
-	/* Enumerate member class-likes: class-table entries keyed "Module::Name". */
-	zend_string *mod_lc = zend_string_tolower(bce->name);
-	zend_string *key;
-	zval *val;
-	ZEND_HASH_MAP_FOREACH_STR_KEY_VAL(EG(class_table), key, val) {
-		if (key && reflection_module_key_is_member(key, mod_lc)) {
-			add_next_index_str(return_value, zend_string_copy(Z_CE_P(val)->name));
-		}
+	zend_string *fname;
+	zend_function *fn;
+	ZEND_HASH_MAP_FOREACH_STR_KEY_PTR(&bce->function_table, fname, fn) {
+		if (!fname) { continue; }
+		/* Only the module's own declared functions (the backing class has no parent). */
+		if (fn->common.scope != bce) { continue; }
+		zend_string *qualified = zend_string_concat3(
+			ZSTR_VAL(bce->name), ZSTR_LEN(bce->name), "::", 2,
+			ZSTR_VAL(fn->common.function_name), ZSTR_LEN(fn->common.function_name));
+		add_next_index_str(return_value, qualified);
 	} ZEND_HASH_FOREACH_END();
-	zend_string_release(mod_lc);
+}
+
+/* Module-level constants are class constants of the backing class; return a
+ * name => value map (reflection bypasses `internal` visibility, as it does `private`). */
+ZEND_METHOD(ReflectionModule, getConstants)
+{
+	ZEND_PARSE_PARAMETERS_NONE();
+	zend_class_entry *bce = reflection_module_backing_ce(ZEND_THIS);
+	array_init(return_value);
+	if (!bce) { return; }
+
+	if (zend_update_class_constants(bce) == FAILURE) {
+		return;
+	}
+
+	zend_string *cname;
+	zend_class_constant *c;
+	ZEND_HASH_MAP_FOREACH_STR_KEY_PTR(CE_CONSTANTS_TABLE(bce), cname, c) {
+		if (!cname) { continue; }
+		zval val;
+		ZVAL_COPY_OR_DUP(&val, &c->value);
+		if (Z_TYPE(val) == IS_CONSTANT_AST) {
+			if (zval_update_constant_ex(&val, c->ce) == FAILURE) {
+				zval_ptr_dtor(&val);
+				continue;
+			}
+		}
+		zend_hash_update(Z_ARRVAL_P(return_value), cname, &val);
+	} ZEND_HASH_FOREACH_END();
 }
 
 ZEND_METHOD(ReflectionModule, getSymbolVisibility)
@@ -8290,11 +8407,23 @@ ZEND_END_ARG_INFO()
 ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_ReflectionModule_getSymbolVisibility, 0, 1, IS_STRING, 0)
 	ZEND_ARG_TYPE_INFO(0, symbolName, IS_STRING, 0)
 ZEND_END_ARG_INFO()
+/* getInterfaces / getEnums / getModules / getFunctions / getConstants share the
+ * no-argument, array-returning shape. */
+#define arginfo_class_ReflectionModule_getInterfaces arginfo_class_ReflectionModule_getClasses
+#define arginfo_class_ReflectionModule_getEnums      arginfo_class_ReflectionModule_getClasses
+#define arginfo_class_ReflectionModule_getModules    arginfo_class_ReflectionModule_getClasses
+#define arginfo_class_ReflectionModule_getFunctions  arginfo_class_ReflectionModule_getClasses
+#define arginfo_class_ReflectionModule_getConstants  arginfo_class_ReflectionModule_getClasses
 
 static const zend_function_entry reflection_module_functions[] = {
 	ZEND_ME(ReflectionModule, __construct, arginfo_class_ReflectionModule___construct, ZEND_ACC_PUBLIC)
 	ZEND_ME(ReflectionModule, getName, arginfo_class_ReflectionModule_getName, ZEND_ACC_PUBLIC)
 	ZEND_ME(ReflectionModule, getClasses, arginfo_class_ReflectionModule_getClasses, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionModule, getInterfaces, arginfo_class_ReflectionModule_getInterfaces, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionModule, getEnums, arginfo_class_ReflectionModule_getEnums, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionModule, getModules, arginfo_class_ReflectionModule_getModules, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionModule, getFunctions, arginfo_class_ReflectionModule_getFunctions, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionModule, getConstants, arginfo_class_ReflectionModule_getConstants, ZEND_ACC_PUBLIC)
 	ZEND_ME(ReflectionModule, getSymbolVisibility, arginfo_class_ReflectionModule_getSymbolVisibility, ZEND_ACC_PUBLIC)
 	ZEND_FE_END
 };
