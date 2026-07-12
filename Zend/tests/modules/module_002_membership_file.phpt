@@ -2,6 +2,7 @@
 Modules: file-level membership declaration, with and without an inner namespace
 --FILE--
 <?php
+require __DIR__ . '/module_002_def.inc';         // claims (public) — loaded before the bodies
 require __DIR__ . '/module_002_member_ns.inc';
 require __DIR__ . '/module_002_member_root.inc';
 

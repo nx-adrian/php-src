@@ -12,6 +12,7 @@ file_put_contents($dir . '/def.php', <<<'PHP'
 module Shop {
     public class Cart { public function tag(): string { return "cart"; } }
     public GuestUser;
+    public Service;
     internal Auth\PasswordChecker;
 }
 PHP);

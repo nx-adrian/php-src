@@ -1,5 +1,34 @@
 # PHP Modules — Implementation Design Notes (branch: php-modules)
 
+## Unclaimed split-file symbols: internal by default
+
+Audit found the RFC self-contradictory on unclaimed symbols (a class in a membership
+file that the definition never claims): one passage called them "reachable-but-
+undocumented", another "unreachable code". The PoC left them *public* (reachable by
+canonical name once loaded) — an easy way to leak an implementation detail.
+
+Changed the split-file visibility reconciliation in `zend_compile_class_decl` to make
+unclaimed members `internal` by default. The visibility map stores PUBLIC=1/INTERNAL=2,
+so `zend_hash_find_ptr` returning NULL cleanly means "unclaimed"; the gate flipped from
+`if (vis && vis == INTERNAL)` to `if (!vis || vis == INTERNAL)`. One line; reuses the
+existing internal enforcement wholesale (runtime gate, reflection, opcache-resident
+ZEND_ACC2_MODULE_INTERNAL). Consequences:
+- To expose a split-file member outside its module you must now claim it `public`
+  (previously optional). `internal` no longer needs claiming (it is the default).
+- Unclaimed symbols are never registered as members, so `module::Name` cannot resolve
+  them (compile-time "not a member") — they are reachable only by bare name (same file)
+  or canonical name (same module), and denied from outside. Verified.
+- Module-scoped, not file-scoped: other files of the same module can still reach an
+  unclaimed symbol, and same-named helpers in two files still collide. Strict
+  file-privacy would need a file-scoped symbol table (deferred; see RFC open question).
+
+Test updates: module_002/008/038 had unclaimed members they treated as public — added
+`public` claims for the ones meant to be reachable. New module_048 documents the default
+(internal: intra-file ok, same-module ok, outside denied). RFC "Unclaimed Symbols"
+rewritten to state the current behavior and frame the three options (internal-default /
+public-default / strict file-private), noting option 3 dovetails with future
+file-private symbols. 50/50 module tests; audits A-F green.
+
 ## Tier-2 autoload transform: missing null terminator (memory bug fix)
 
 Found while stress-testing split-file autoload from the playground. The tier-2
