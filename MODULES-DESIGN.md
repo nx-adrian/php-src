@@ -1630,3 +1630,15 @@ Construction control = `internal __construct`; clone control = `internal __clone
 existing PHP visibility mechanisms. Tests module_044 (clone) + module_045 (new). 47 module tests
 green; clone/type_declarations/reflection suites green (opcache cli-server failures are
 environment: `posix_spawn` unavailable in sandbox). RFC: added "Escaped internal objects".
+
+## Dynamic `instanceof $name` sees through internal (identity fix)
+
+Audit K: `$obj instanceof $var` (dynamic class name) for an internal type was denied,
+while literal `instanceof M::Sec` and `is_a()` (both string and dynamic) were allowed —
+an inconsistency in the identity/observation model. Dynamic instanceof resolves its class
+via the FETCH_CLASS opcode -> `zend_fetch_class`, which gated unconditionally; instanceof
+compiles that ref with ZEND_FETCH_CLASS_SILENT (it must resolve-or-false, never throw).
+Same signal/fix as `catch`: skip the module gate for SILENT fetches, now also in
+`zend_fetch_class`/`zend_fetch_class_with_scope` (previously only `zend_fetch_class_by_name`).
+Construction (`new $name`) uses DEFAULT|EXCEPTION, not SILENT, so it stays gated. Test
+module_054.
