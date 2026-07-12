@@ -266,7 +266,7 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %type <ast> unprefixed_use_declarations const_decl inner_statement
 %type <ast> expr optional_expr while_statement for_statement foreach_variable
 %type <ast> foreach_statement declare_statement finally_statement unset_variable variable
-%type <ast> module_qualified_name module_member_list module_member
+%type <ast> module_qualified_name module_member_list module_member module_member_inner
 %type <num> member_visibility
 %type <ast> extends_from parameter optional_type_without_static argument argument_no_expr global_var
 %type <ast> static_var class_statement trait_adaptation trait_precedence trait_alias
@@ -1533,6 +1533,23 @@ member_visibility:
 ;
 
 module_member:
+		module_member_inner
+			{ $$ = $1; }
+	|	attributes module_member_inner
+			{ zend_ast *d = $2->child[0];
+			  /* Attributes attach to an *inline* member declaration exactly as they do
+			   * outside a module. Forward-declared members (a body-less claim, or a
+			   * nested-module claim/definition) have no declaration to carry them. */
+			  if (d->kind == ZEND_AST_MODULE || d->kind == ZEND_AST_MODULE_CLAIM) {
+				  zend_error_noreturn(E_COMPILE_ERROR,
+					  "Attributes are not supported on a forward-declared or nested module member; "
+					  "place them on the member's definition instead");
+			  }
+			  $2->child[0] = zend_ast_with_attributes(d, $1);
+			  $$ = $2; }
+;
+
+module_member_inner:
 		member_visibility class_declaration_statement
 			{ $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, $2); }
 	|	member_visibility interface_declaration_statement
@@ -1542,7 +1559,11 @@ module_member:
 	|	member_visibility enum_declaration_statement
 			{ $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, $2); }
 	|	member_visibility T_CONST const_list ';'
-			{ $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, $3); }
+			{ /* Represent a module constant as a class-const group (its home is the
+			   * backing class), so an inline attribute attaches to child[1] exactly as it
+			   * does for a class-body constant — no special-casing, no leak. */
+			  zend_ast *g = zend_ast_create(ZEND_AST_CLASS_CONST_GROUP, $3, NULL, NULL);
+			  $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, g); }
 	|	member_visibility T_STATIC function returns_ref identifier backup_doc_comment '(' parameter_list ')'
 		return_type backup_fn_flags method_body backup_fn_flags
 			{ zend_ast *m = zend_ast_create_decl(ZEND_AST_METHOD,

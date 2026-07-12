@@ -1,5 +1,36 @@
 # PHP Modules — Implementation Design Notes (branch: php-modules)
 
+## Attributes on inline module members
+
+Audit found `#[Attr] public class C {}` inside a `module { }` block was a parse error,
+though membership-file code (`module M; #[Attr] class C {}`) already supported attributes
+(standard top-level statements — the `module M;` directive doesn't wrap them).
+
+Grammar: split `module_member` into a wrapper + `module_member_inner`, adding
+`attributes module_member_inner`. Regenerates conflict-free (%expect 0). The wrapper
+attaches the attribute list to the member's declaration via `zend_ast_with_attributes`
+and rejects it on a claim / nested module (`ZEND_AST_MODULE`/`ZEND_AST_MODULE_CLAIM`) with
+a clear message — attributes belong on the *definition*, not a forward declaration. This
+is a permanent design restriction (not a limitation to lift).
+
+Const needed care: a module const is re-homed onto the backing class. Originally the
+member produced a `CONST_DECL` and `zend_ast_with_attributes` list-appends the attribute
+node; wrapping that in a `CLASS_CONST_GROUP` and detaching the attr worked but leaked the
+attribute-name string (the detached node was orphaned from the file AST, so its zval
+strings weren't freed — methods/props don't leak because their attrs live on a decl the
+member list frees). Fix: the grammar now emits a `CLASS_CONST_GROUP` directly for a module
+const (exactly like a class-body const), so the inline attribute attaches to child[1] and
+the node stays reachable — no detachment, no leak. `zend_compile_module` just stamps the
+visibility flag onto the group.
+
+Name resolution is consistent with the module model: a bare `#[Attr]` resolves
+module-relative (`App::Attr`), a `#[\Attr]` resolves global — same as `new Attr` /
+`Attr::class` in the same scope. Verified for class/interface/trait/enum/static-fn/
+static-prop/const via Reflection; attributes compose with `internal`. Tests module_052
+(all kinds + name resolution + internal compose), module_053 (claim rejection). Module-
+level attributes (`#[Attr] module M`) are out of scope — they need `Attribute::TARGET_MODULE`
+machinery — and are documented as Future Scope in the RFC.
+
 ## Module::Member::class yields the FQN (fix)
 
 Audit found `M::C::class` (the ::class name literal of a module member class, by name)

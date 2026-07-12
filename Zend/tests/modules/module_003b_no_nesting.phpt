@@ -10,4 +10,4 @@ forms ("public module B { ... }" / "internal module B { ... }") are exercised el
 module A { module B { public class C {} } }
 ?>
 --EXPECTF--
-Parse error: syntax error, unexpected token "module", expecting "internal" or "public" or "}" in %s on line %d
+Parse error: syntax error, unexpected token "module", expecting "internal" or "public" or "#[" or "}" in %s on line %d
