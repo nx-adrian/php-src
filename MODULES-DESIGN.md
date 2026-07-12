@@ -1,5 +1,25 @@
 # PHP Modules — Implementation Design Notes (branch: php-modules)
 
+## catch of an internal exception type must work (identity vs use)
+
+Audit found the class-reference gating inconsistent: from outside a module, new /
+extends / implements / trait-use / **catch** of an internal type were all denied,
+but instanceof / is_a / type declarations were allowed. Decision: the boundary gates
+*use* (construction + inheritance), not *identity/observation* — so instanceof, is_a,
+type declarations, AND catch should all see through. catch especially: gating it means
+a module could throw an internal exception type no external caller can name and catch,
+i.e. an uncatchable exception — a footgun.
+
+Root cause: catch resolves its class via `zend_fetch_class_by_name`, which applies the
+module gate; instanceof uses the ungated `zend_lookup_class_ex` directly. catch is the
+only caller (whole tree) that passes `ZEND_FETCH_CLASS_SILENT`, and the gate *throws* —
+incompatible with a SILENT fetch, which must resolve-or-return-NULL. Fix: skip the gate
+in `zend_fetch_class_by_name` when `ZEND_FETCH_CLASS_SILENT` is set. One line, no VM
+regen (catch already passes SILENT). new/extends/etc. pass EXCEPTION, not SILENT, so
+they stay gated (verified). Test module_049. RFC escape section reworded to the
+"identity visible, use denied" model; Future Scope gained "Containing Internal Exception
+Types" (boundary as implicit catch(internal) + public fall-through type).
+
 ## Unclaimed split-file symbols: internal by default
 
 Audit found the RFC self-contradictory on unclaimed symbols (a class in a membership

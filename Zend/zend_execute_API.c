@@ -1983,7 +1983,13 @@ zend_class_entry *zend_fetch_class_by_name(zend_string *class_name, zend_string 
 		report_class_fetch_error(class_name, fetch_type);
 		return NULL;
 	}
-	if (UNEXPECTED(zend_module_runtime_access_denied(ce))) {
+	/* PHP Modules: the boundary gates *use* of an internal type (new/extends/implements/
+	 * trait-use), not identity/observation. A SILENT fetch — `catch` — must resolve the
+	 * class without throwing: catching an internal exception type from outside has to work,
+	 * or a module could throw an exception no external caller can name and catch. So the
+	 * gate is skipped for SILENT fetches, mirroring how `instanceof` resolves ungated. */
+	if (!(fetch_type & ZEND_FETCH_CLASS_SILENT)
+	 && UNEXPECTED(zend_module_runtime_access_denied(ce))) {
 		zend_throw_error(NULL,
 			"Cannot access internal module member \"%s\" from outside its module", ZSTR_VAL(class_name));
 		return NULL;
