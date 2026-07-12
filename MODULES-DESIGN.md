@@ -526,3 +526,21 @@ existing runtime same-module enforcement applies unchanged.
 module constants (`M::C`, `module::C`); (b) module static functions (`M::f()`,
 `module::f()`); (c) module static properties (`M::$x`, `module::$x`). Static
 properties last (initialization/storage is the heaviest piece).
+
+### Increment 12 ruling — no member-name uniqueness restriction (agreed)
+
+Member names may overlap freely across kinds: a module constant, static function,
+static property, and member class may all share a name (and const/fn/prop may
+share names with each other). **No cross-check, no "used names" tracking.**
+
+Rationale: with the synthetic backing class, each `M::Name` occurrence resolves in
+exactly one grammatical position, and each position consults exactly one table —
+value position → backing CE `constants_table`; class-reference position
+(new/extends/instanceof/type) → the member class in the class table;
+`M::Name()` → `function_table`; `M::$name` → static-members table. No single
+position accepts two interpretations, so overlapping names can never cause a wrong
+resolution. This is identical to how a normal class already lets `const X`,
+`function X()`, and `$X` coexist. An artificial uniqueness rule was considered and
+**rejected**: it protects against no real conflict, would surprise users, and
+diverges from class semantics for no benefit. Sub-slice (a) therefore just
+populates the backing CE's tables; resolution stays position-directed.
