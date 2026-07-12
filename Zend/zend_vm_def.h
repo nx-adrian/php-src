@@ -8343,6 +8343,24 @@ ZEND_VM_HANDLER(143, ZEND_DECLARE_CONST, CONST, CONST)
 	ZEND_VM_NEXT_OPCODE_CHECK_EXCEPTION();
 }
 
+/* PHP Modules (experimental): register a module + its member roster at runtime.
+ * op1 = module name (CONST string); op2 = roster (CONST array, lc "module::member"
+ * -> LONG visibility). Runs every request, including opcache cache hits. */
+ZEND_VM_HANDLER(212, ZEND_DECLARE_MODULE, CONST, CONST)
+{
+	USE_OPLINE
+	zval *name;
+	zval *roster;
+
+	SAVE_OPLINE();
+	name   = GET_OP1_ZVAL_PTR(BP_VAR_R);
+	roster = GET_OP2_ZVAL_PTR(BP_VAR_R);
+	zend_declare_module_runtime(Z_STR_P(name), Z_ARRVAL_P(roster));
+	FREE_OP1();
+	FREE_OP2();
+	ZEND_VM_NEXT_OPCODE_CHECK_EXCEPTION();
+}
+
 ZEND_VM_HANDLER(210, ZEND_DECLARE_ATTRIBUTED_CONST, CONST, CONST)
 {
 	USE_OPLINE
