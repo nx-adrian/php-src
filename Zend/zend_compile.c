@@ -1204,7 +1204,6 @@ static zend_string *zend_resolve_const_name(zend_string *name, uint32_t type, bo
 		name, type, is_fully_qualified, true, FC(imports_const));
 }
 
-static bool zend_module_member_is_hidden(zend_string *lc_class_name);
 
 static zend_string *zend_resolve_class_name(zend_string *name, uint32_t type) /* {{{ */
 {
@@ -1272,18 +1271,10 @@ static zend_string *zend_resolve_class_name(zend_string *name, uint32_t type) /*
 			return name;
 		}
 
-		/* PHP Modules: reject a static reference to a module's internal member from
-		 * outside the module boundary. (Dynamic and cross-file runtime references
-		 * are gated by the runtime membership check in a later increment.) */
-		zend_string *lc = zend_string_tolower(name);
-		if (zend_module_member_is_hidden(lc)) {
-			zend_string *dup = zend_string_copy(name);
-			zend_string_release(lc);
-			zend_error_noreturn(E_COMPILE_ERROR,
-				"Cannot access internal module member \"%s\" from outside its module", ZSTR_VAL(dup));
-		}
-		zend_string_release(lc);
-
+		/* PHP Modules: internal-member access is NOT checked here. Like every other
+		 * PHP visibility (private/protected), it is enforced at RUNTIME (the class
+		 * fetch / dispatch gates), so a reference in never-executed code does not
+		 * error and enforcement fires only when the access actually runs. */
 		return zend_string_copy(name);
 	}
 
@@ -10560,33 +10551,6 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 	roster_node.op_type = IS_CONST;
 	ZVAL_ARR(&roster_node.u.constant, roster);
 	zend_emit_op(NULL, ZEND_DECLARE_MODULE, &name_node, &roster_node);
-}
-/* }}} */
-
-/* PHP Modules: is the given canonical (lc) class name an internal member of a
- * module OTHER than the one currently being compiled? Used to gate references. */
-static bool zend_module_member_is_hidden(zend_string *lc_class_name) /* {{{ */
-{
-	const char *sep = zend_memnstr(ZSTR_VAL(lc_class_name), "::", 2,
-		ZSTR_VAL(lc_class_name) + ZSTR_LEN(lc_class_name));
-	if (!sep) {
-		return false; /* not a module-qualified name */
-	}
-	size_t mod_len = sep - ZSTR_VAL(lc_class_name);
-	zend_string *mod_lc = zend_string_init(ZSTR_VAL(lc_class_name), mod_len, 0);
-
-	zend_php_module *mod = zend_lookup_module(mod_lc);
-	bool hidden = false;
-	if (mod) {
-		void *vis = zend_hash_find_ptr(&mod->members, lc_class_name);
-		if (vis && (uintptr_t) vis == ZEND_MODULE_MEMBER_INTERNAL) {
-			/* Hidden unless we are compiling inside the owning module. */
-			hidden = !(FC(current_module)
-				&& zend_string_equals_ci(FC(current_module), mod->name));
-		}
-	}
-	zend_string_release(mod_lc);
-	return hidden;
 }
 /* }}} */
 

@@ -968,3 +968,22 @@ static/ns/trait/enum tests green.
   (`A::B::C::D`) need iterating the nested `CLASS_CONST` — this is the natural hook for
   **nested modules (C7)**, which also require nested-module *declaration* (still
   rejected today). C6 provides the resolution groundwork; C7 declaration is separate.
+
+## internal enforcement is uniformly RUNTIME (compile-time hidden check removed)
+
+Removed the compile-time check (`zend_module_member_is_hidden` in
+`zend_resolve_class_name`) that rejected any *static* reference to an internal member.
+That check fired during compilation, so `new Module::Internal()` in never-executed code
+(an `if (false)` branch or an uncalled function) was a compile fatal — inconsistent with
+PHP, where visibility is a runtime property (a `private` const in dead code does not
+error). Now internal-member access is enforced solely by the runtime gates (class fetch
+/ method-dispatch / const-fetch / property-fetch), so a reference errors only when it
+actually executes, matching private/protected exactly.
+
+This is *uniform* — instantiation, access, AND `extends` are all runtime (an internal
+parent errors when the subclass declaration executes, i.e. when reached). Chosen over
+the recommendations-doc split (access=runtime, extends=compile) for consistency and to
+avoid erroring on dead code; the eager compile-time catch is left to static analysis,
+as it is for private/protected. `zend_module_member_is_hidden` deleted (now unused).
+`module_006` updated to assert the runtime behavior (dead-code no-error + reached-error).
+33 module + 384 class/ns/const/autoload tests green.
