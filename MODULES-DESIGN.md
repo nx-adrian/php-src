@@ -1742,3 +1742,14 @@ module visibility modifier — structurally identical to public/private/readonly
 needed updating (it asserted the old fully-reserved behavior). This narrows the keyword's BC break
 to just top-level declaration names (class/interface/trait/enum/function/const), matching the RFC's
 intent that `internal` be "on par with public/private".
+
+## Module::Member::class folds in constant expressions too
+
+`Module::Member::class` yields the canonical name string ("M::C"). The runtime `::class` path
+(zend_compile_class_name / zend_compile_class_ref) already folded a module chain via
+zend_try_module_chain_class, but the *constant-expression* path (zend_compile_const_expr_class_name)
+did not — so `const B = M::C::class;` fatally failed with "(expression)::class cannot be used in
+constant expressions", because the chain node is not a plain ZVAL. Mirrored the runtime handling
+into the const-expr path: before that error, try zend_try_module_chain_class(class_ast) and, if it
+resolves, fold the whole ::class node to the canonical string constant. Identity is not gated, so it
+works for an internal member too. A genuine (expression)::class is still rejected. Test: module_064.

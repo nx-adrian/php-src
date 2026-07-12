@@ -12454,6 +12454,18 @@ static void zend_compile_const_expr_class_name(zend_ast **ast_ptr) /* {{{ */
 	zend_ast *ast = *ast_ptr;
 	zend_ast *class_ast = ast->child[0];
 	if (class_ast->kind != ZEND_AST_ZVAL) {
+		/* PHP Modules: a module-member chain used as a class name (`M::C::class`) folds to its
+		 * canonical name string ("M::C") in a constant expression, exactly as it does at runtime
+		 * (see zend_compile_class_name / zend_compile_class_ref). Without this it would be rejected
+		 * below as a generic "(expression)::class". */
+		zend_string *module_chain = zend_try_module_chain_class(class_ast);
+		if (module_chain) {
+			zval zv;
+			ZVAL_STR(&zv, module_chain);
+			zend_ast_destroy(ast);
+			*ast_ptr = zend_ast_create_zval(&zv);
+			return;
+		}
 		zend_error_noreturn(E_COMPILE_ERROR,
 			"(expression)::class cannot be used in constant expressions");
 	}
