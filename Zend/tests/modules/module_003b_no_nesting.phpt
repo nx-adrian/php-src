@@ -1,8 +1,8 @@
 --TEST--
-Modules: module declarations cannot be nested (compile-time fatal)
+Modules: nested modules are not supported yet (parse error)
 --FILE--
 <?php
-module A { module B { class C {} } }
+module A { module B { public class C {} } }
 ?>
 --EXPECTF--
-Fatal error: Module declarations cannot be nested in %s on line %d
+Parse error: syntax error, unexpected token "module"%s in %s on line %d

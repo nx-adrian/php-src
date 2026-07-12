@@ -169,9 +169,45 @@ behave ("Cannot use X as namespace name", "namespace must be first"). True
 to E_COMPILE_ERROR fatal for these semantic guards; documented here rather than
 inventing a catchable path the rest of the engine doesn't use.
 
-**Deferred to increment 2+ (unchanged plan):** `public`/`internal` visibility
-modifiers on module members (needs member-visibility grammar — plain `class`
-inside a manifest works today, `public class` does not yet parse); visibility
-ENFORCEMENT; `::` in `new`/type/extends grammar; the runtime-prologue
-handshake; two-tier autoload; forward-declaration ("claim") merging;
-ReflectionModule.
+### Increment 2 (2026-07-07) — native `::` syntax + member visibility. DONE.
+
+Implemented and tested (`Zend/tests/modules/`, 9 phpt, all pass; leak-free;
+no regression in lang/namespaces):
+
+- **Native `::` class references** (the syntax the RFC actually wants,
+  replacing the increment-1 dynamic-string workaround): `module_qualified_name:
+  name '::' name` wired into `class_name_reference` (so `new Vendor\User::Profile()`
+  parses), `type_without_static` (type hints), and `extends_from`. Built with
+  `%expect 1` — exactly the one spike-predicted `instanceof A::B` vs `A::$prop`
+  shift/reduce, resolved by default-shift (documented in the grammar). The name
+  is built as a canonical `Module::Member` string AST marked `ZEND_NAME_FQ`, so
+  resolution looks it up verbatim as the class-table key. Verified: `new`, param
+  and return type hints, `extends`, and `instanceof` all work with `::`.
+  (`use`-alias resolution of the module segment is still deferred.)
+- **Member visibility**: the manifest block is now a RESTRICTED
+  `module_member_list` — every member is `public|internal` + a class/interface/
+  trait/enum/const declaration. Imperative code is a natural parse error (RFC
+  requirement met for free). Visibility is carried on a `ZEND_AST_MODULE_MEMBER`
+  wrapper (attr) and recorded per-member in the registry (`mod->members`:
+  canonical-lc name → visibility).
+- **Enforcement**: `zend_resolve_class_name` (FQ path) now rejects a static
+  reference to an `internal` member from outside the owning module with
+  `E_COMPILE_ERROR` ("Cannot access internal module member ..."). Inside the
+  module (`FC(current_module)` matches), internal access is allowed. Verified:
+  `new Billing::Invoice()` (public) works everywhere; `new Billing::Ledger()`
+  (internal) works inside `Billing`, compile-errors outside.
+
+**Enforcement scope (honest limits):** the internal check is *compile-time* and
+covers *static* references (`new`/type/`extends`) within a compilation unit
+where the module is already registered. Dynamic references (`new $string`) and
+cross-file references before the owning manifest is loaded are NOT yet gated —
+that needs the runtime-prologue membership check + handshake (increment 3).
+
+**Deferred to increment 3+:** `::` in `new`/type/extends is DONE; remaining:
+runtime + cross-file internal enforcement via the membership handshake;
+two-tier autoload; forward-declaration ("claim") merging + membership-file
+members that fill claims; nested modules; `internal` on *class members*
+(methods/props) as opposed to module top-level members; module `static`
+functions/properties + `module::` self-reference; asymmetric-visibility
+interplay; ReflectionModule. Also an audit pass for `::`-name consumers
+(serialize `O:` strings, var_export) per the canonical-key implication above.

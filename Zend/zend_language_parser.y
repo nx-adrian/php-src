@@ -45,7 +45,13 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %define api.pure full
 %define api.value.type {zend_parser_stack_elem}
 %define parse.error verbose
-%expect 0
+/* PHP Modules (experimental): the module-boundary "::" in a class-reference
+ * position (new/instanceof via class_name_reference) introduces exactly one
+ * shift/reduce conflict — "instanceof A::B" (module-qualified type) vs
+ * "instanceof A::$prop" (static-property class expr). Bison's default (shift)
+ * selects the module-qualified interpretation, which is the intended behavior.
+ * See MODULES-DESIGN.md (grammar spike) for the full analysis. */
+%expect 1
 
 %destructor { zend_ast_destroy($$); } <ast>
 %destructor { if ($$) zend_string_release_ex($$, 0); } <str>
@@ -260,6 +266,8 @@ static YYSIZE_T zend_yytnamerr(char*, const char*);
 %type <ast> unprefixed_use_declarations const_decl inner_statement
 %type <ast> expr optional_expr while_statement for_statement foreach_variable
 %type <ast> foreach_statement declare_statement finally_statement unset_variable variable
+%type <ast> module_qualified_name module_member_list module_member
+%type <num> member_visibility
 %type <ast> extends_from parameter optional_type_without_static argument argument_no_expr global_var
 %type <ast> static_var class_statement trait_adaptation trait_precedence trait_alias
 %type <ast> absolute_trait_method_reference trait_method_reference property echo_expr
@@ -422,7 +430,7 @@ top_statement:
 			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, NULL);
 			  RESET_DOC_COMMENT(); }
 	|	T_MODULE namespace_declaration_name { RESET_DOC_COMMENT(); }
-		'{' top_statement_list '}'
+		'{' module_member_list '}'
 			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, $5); }
 	|	T_USE mixed_group_use_declaration ';'		{ $$ = $2; }
 	|	T_USE use_type group_use_declaration ';'	{ $$ = $3; $$->attr = $2; }
@@ -677,6 +685,7 @@ enum_case_expr:
 extends_from:
 		%empty				{ $$ = NULL; }
 	|	T_EXTENDS class_name	{ $$ = $2; }
+	|	T_EXTENDS module_qualified_name	{ $$ = $2; }
 ;
 
 interface_extends_list:
@@ -881,6 +890,7 @@ type_without_static:
 		T_ARRAY		{ $$ = zend_ast_create_ex(ZEND_AST_TYPE, IS_ARRAY); }
 	|	T_CALLABLE	{ $$ = zend_ast_create_ex(ZEND_AST_TYPE, IS_CALLABLE); }
 	|	name		{ $$ = $1; }
+	|	module_qualified_name	{ $$ = $1; }
 ;
 
 union_type_without_static_element:
@@ -1479,8 +1489,44 @@ class_name:
 	|	name { $$ = $1; }
 ;
 
+/* PHP Modules (experimental): the manifest block is a RESTRICTED member list.
+ * Every member carries a mandatory visibility (public|internal); only structural
+ * declarations are permitted, so imperative code is a natural parse error. */
+module_member_list:
+		%empty
+			{ $$ = zend_ast_create_list(0, ZEND_AST_STMT_LIST); }
+	|	module_member_list module_member
+			{ $$ = zend_ast_list_add($1, $2); }
+;
+
+member_visibility:
+		T_PUBLIC	{ $$ = ZEND_MODULE_MEMBER_PUBLIC; }
+	|	T_INTERNAL	{ $$ = ZEND_MODULE_MEMBER_INTERNAL; }
+;
+
+module_member:
+		member_visibility class_declaration_statement
+			{ $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, $2); }
+	|	member_visibility interface_declaration_statement
+			{ $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, $2); }
+	|	member_visibility trait_declaration_statement
+			{ $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, $2); }
+	|	member_visibility enum_declaration_statement
+			{ $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, $2); }
+	|	member_visibility T_CONST const_list ';'
+			{ $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, $3); }
+;
+
+/* PHP Modules (experimental): a module-qualified class reference,
+ * "Module::Member" (single "::" at the module boundary). */
+module_qualified_name:
+		name T_PAAMAYIM_NEKUDOTAYIM name
+			{ $$ = zend_ast_create_module_qualified_name($1, $3); }
+;
+
 class_name_reference:
 		class_name		{ $$ = $1; }
+	|	module_qualified_name	{ $$ = $1; }
 	|	new_variable	{ $$ = $1; }
 	|	'(' expr ')'	{ $$ = $2; }
 ;
