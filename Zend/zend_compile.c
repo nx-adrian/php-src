@@ -7462,7 +7462,7 @@ bool zend_handle_encoding_declaration(zend_ast *ast) /* {{{ */
 /* }}} */
 
 /* Check whether this is the first statement, not counting declares. */
-static zend_result zend_is_first_statement(const zend_ast *ast, bool allow_nop) /* {{{ */
+static zend_result zend_is_first_statement(const zend_ast *ast, bool allow_nop, bool allow_leading_module) /* {{{ */
 {
 	uint32_t i = 0;
 	const zend_ast_list *file_ast = zend_ast_get_list(CG(ast));
@@ -7475,9 +7475,12 @@ static zend_result zend_is_first_statement(const zend_ast *ast, bool allow_nop) 
 				return FAILURE;
 			}
 		} else if (file_ast->child[i]->kind != ZEND_AST_DECLARE
-				&& file_ast->child[i]->kind != ZEND_AST_MODULE) {
-			/* A leading module membership declaration (`module Foo;`) is permitted
-			 * before a namespace, exactly like `declare`. */
+				&& !(allow_leading_module && file_ast->child[i]->kind == ZEND_AST_MODULE)) {
+			/* A leading module membership declaration (`module Foo;`) is permitted before a
+			 * namespace, exactly like `declare` (allow_leading_module). But a membership
+			 * declaration is itself required to be first — only `declare` may precede it —
+			 * so when checking one, preceding module nodes (a definition block or another
+			 * membership) are NOT allowed. */
 			return FAILURE;
 		}
 		i++;
@@ -7510,14 +7513,14 @@ static void zend_compile_declare(const zend_ast *ast) /* {{{ */
 			zval_ptr_dtor_nogc(&value_zv);
 		} else if (zend_string_equals_literal_ci(name, "encoding")) {
 
-			if (FAILURE == zend_is_first_statement(ast, /* allow_nop */ false)) {
+			if (FAILURE == zend_is_first_statement(ast, /* allow_nop */ false, /* allow_leading_module */ true)) {
 				zend_error_noreturn(E_COMPILE_ERROR, "Encoding declaration pragma must be "
 					"the very first statement in the script");
 			}
 		} else if (zend_string_equals_literal_ci(name, "strict_types")) {
 			zval value_zv;
 
-			if (FAILURE == zend_is_first_statement(ast, /* allow_nop */ true)) {
+			if (FAILURE == zend_is_first_statement(ast, /* allow_nop */ true, /* allow_leading_module */ true)) {
 				zend_error_noreturn(E_COMPILE_ERROR, "strict_types declaration must be "
 					"the very first statement in the script");
 			}
@@ -10351,7 +10354,7 @@ static void zend_compile_namespace(const zend_ast *ast) /* {{{ */
 
 	bool is_first_namespace = (!with_bracket && !FC(current_namespace))
 		|| (with_bracket && !FC(has_bracketed_namespaces));
-	if (is_first_namespace && FAILURE == zend_is_first_statement(ast, /* allow_nop */ true)) {
+	if (is_first_namespace && FAILURE == zend_is_first_statement(ast, /* allow_nop */ true, /* allow_leading_module */ true)) {
 		zend_error_noreturn(E_COMPILE_ERROR, "Namespace declaration statement has to be "
 			"the very first statement or after any declare call in the script");
 	}
@@ -10598,6 +10601,22 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 			"This file already declares membership in module \"%s\"; join a nested module "
 			"directly with \"module %s::%s;\" instead of a second module statement",
 			ZSTR_VAL(parent_module), ZSTR_VAL(parent_module), ZSTR_VAL(raw_name));
+	}
+
+	/* A membership declaration ("module Foo;", no block) must be the first statement in the
+	 * file — only a leading `declare` may precede it. This keeps a file to a single form: it
+	 * is either "block form" (one or more brace-delimited `module { … }` / `namespace { … }`
+	 * blocks) or a single membership file, never a definition block followed by a membership
+	 * "mode switch" that reopens a module for the rest of the file. The intended patterns
+	 * `module Foo; namespace Bar;` and `module Foo; module Inner { … }` keep the membership
+	 * first and are unaffected (the block/namespace follows it). `allow_leading_module` is
+	 * false here so a preceding module node — a definition block, or ordinary code, or a
+	 * namespace — is rejected, unlike the namespace check which tolerates a leading module. */
+	if (!stmt_ast
+	 && FAILURE == zend_is_first_statement(ast, /* allow_nop */ true, /* allow_leading_module */ false)) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"A module membership declaration (\"module %s;\") must be the first statement in "
+			"the file (only a leading declare() may precede it)", ZSTR_VAL(raw_name));
 	}
 
 	zend_string *name;                                 /* owned; released at function end */
