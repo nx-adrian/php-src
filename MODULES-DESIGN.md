@@ -1642,3 +1642,22 @@ Same signal/fix as `catch`: skip the module gate for SILENT fetches, now also in
 `zend_fetch_class`/`zend_fetch_class_with_scope` (previously only `zend_fetch_class_by_name`).
 Construction (`new $name`) uses DEFAULT|EXCEPTION, not SILENT, so it stays gated. Test
 module_054.
+
+## Module blocks coexist with bracketed namespaces (symmetric)
+
+User question: does a module block coexist with a separate `namespace A { }` in the same
+file? Found it worked in one order only: `module X\Y {} namespace A {}` parsed (a leading
+module is already exempted from "namespace must be the first statement" in
+zend_is_first_statement, treated like `declare`), but `namespace A {} module X\Y {}` was
+rejected with "No code may exist outside of namespace {}".
+
+Root cause: the module's *inline members and backing class* are compiled via
+zend_compile_top_stmt, whose post-statement zend_verify_namespace() fires for those inner
+CLASS nodes once a bracketed namespace exists (has_bracketed && !in_namespace). Exempting
+only the outer ZEND_AST_MODULE node isn't enough. Fix: zend_verify_namespace() returns
+early when FC(current_module) is set — module-owned code lives in the module's own root
+scope, not the file's namespace scope. Non-module code is unaffected (plain `class Z {}`
+outside a namespace block is still rejected in either order). Guardrails intact: a module
+*wrapped* by a namespace (unbracketed `namespace A; module …` or bracketed
+`namespace A { module … }`) is still "must be in the root namespace". The module always
+registers at its canonical root (X\Y::C, not A\X\Y::C), order-independent. Test module_058.

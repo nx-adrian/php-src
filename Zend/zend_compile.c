@@ -2310,6 +2310,12 @@ zend_ast *zend_negate_num_string(zend_ast *ast) /* {{{ */
 
 static void zend_verify_namespace(void) /* {{{ */
 {
+	/* Code compiled inside a module (its inline members and backing class) lives in the
+	 * module's own root scope, not the file's namespace scope, so the "no code outside
+	 * namespace {}" rule does not apply to it. */
+	if (FC(current_module)) {
+		return;
+	}
 	if (FC(has_bracketed_namespaces) && !FC(in_namespace)) {
 		zend_error_noreturn(E_COMPILE_ERROR, "No code may exist outside of namespace {}");
 	}
@@ -12724,7 +12730,14 @@ void zend_compile_top_stmt(zend_ast *ast) /* {{{ */
 	} else {
 		zend_compile_stmt(ast);
 	}
-	if (ast->kind != ZEND_AST_NAMESPACE && ast->kind != ZEND_AST_HALT_COMPILER) {
+	/* A `module` declaration is a root-namespace structural element (it may not be
+	 * wrapped by a namespace, and it registers its members under the module's own
+	 * canonical root). Like a namespace declaration, it is therefore exempt from the
+	 * "no code outside namespace {}" rule, so a module block may sit alongside bracketed
+	 * namespaces in a file regardless of order (a leading module is already permitted
+	 * before a namespace by zend_is_first_statement). */
+	if (ast->kind != ZEND_AST_NAMESPACE && ast->kind != ZEND_AST_HALT_COMPILER
+			&& ast->kind != ZEND_AST_MODULE) {
 		zend_verify_namespace();
 	}
 }
