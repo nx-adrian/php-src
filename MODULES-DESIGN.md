@@ -1700,3 +1700,20 @@ defaulted-public member behaves exactly like an explicit one (reflection reports
 `isModuleInternal() === false`). A lone visibility keyword with no member (`public;`) is still
 a ParseError. Tests: module_060 (inline, every kind), module_061 (split-file bare claim),
 module_003b repurposed (bare nested module defaults public).
+
+## Membership declarations must be the first statement in the file
+
+A `module X;` membership declaration is a mode switch: it owns the rest of the file. It must
+therefore be the first statement (only a leading `declare()` may precede it), so a file is
+either "block form" (brace-delimited `module { … }` / `namespace { … }` blocks) or a single
+membership file — never a definition block followed by a membership statement that reopens a
+module mid-file. Previously a block-then-`module X;`, or even code-then-`module X;`, compiled
+and silently bound the trailing symbols; this diverged from PHP's namespace rules (which forbid
+mixing bracketed and unbracketed forms).
+
+`zend_is_first_statement` already exempted a *leading* `module` node (so `module X;` may precede
+a `namespace`), which is exactly what let a block precede a membership. Added an
+`allow_leading_module` parameter: the existing namespace/declare callers pass `true` (unchanged);
+the new membership self-check in `zend_compile_module` passes `false`, so a preceding module node
+(a block or another membership) is rejected. The intended patterns `module X; namespace Y;` and
+`module X; module Inner { … }` keep the membership first and are unaffected. Test: module_062.
