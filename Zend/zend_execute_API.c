@@ -1778,6 +1778,8 @@ static ZEND_COLD void report_class_fetch_error(const zend_string *class_name, ui
 	}
 }
 
+static bool zend_module_runtime_access_denied(zend_string *class_name);
+
 zend_class_entry *zend_fetch_class(zend_string *class_name, uint32_t fetch_type) /* {{{ */
 {
 	zend_class_entry *ce, *scope;
@@ -1822,6 +1824,11 @@ check_fetch_type:
 		report_class_fetch_error(class_name, fetch_type);
 		return NULL;
 	}
+	if (UNEXPECTED(zend_module_runtime_access_denied(class_name))) {
+		zend_throw_error(NULL,
+			"Cannot access internal module member \"%s\" from outside its module", ZSTR_VAL(class_name));
+		return NULL;
+	}
 	return ce;
 }
 /* }}} */
@@ -1856,7 +1863,59 @@ zend_class_entry *zend_fetch_class_with_scope(
 		report_class_fetch_error(class_name, fetch_type);
 		return NULL;
 	}
+	if (UNEXPECTED(zend_module_runtime_access_denied(class_name))) {
+		zend_throw_error(NULL,
+			"Cannot access internal module member \"%s\" from outside its module", ZSTR_VAL(class_name));
+		return NULL;
+	}
 	return ce;
+}
+
+/* PHP Modules: at runtime, deny access to a module's internal member unless the
+ * currently-executing code belongs to the same module. The "current module" is
+ * the "<module>::" prefix of the executing function's class scope name. This
+ * closes the cases the compile-time static check cannot see: members resolved
+ * via autoload, and dynamic ("new $name") references. */
+static bool zend_module_runtime_access_denied(zend_string *class_name)
+{
+	const char *val = ZSTR_VAL(class_name);
+	size_t len = ZSTR_LEN(class_name);
+	if (val[0] == '\\') { val++; len--; }
+	const char *sep = zend_memnstr(val, "::", 2, val + len);
+	if (!sep) {
+		return false; /* not module-qualified */
+	}
+	size_t mod_len = sep - val;
+
+	zend_string *lc = zend_string_alloc(len, 0);
+	zend_str_tolower_copy(ZSTR_VAL(lc), val, len);
+	zend_string *mod_lc = zend_string_init(ZSTR_VAL(lc), mod_len, 0);
+
+	bool denied = false;
+	zend_php_module *mod = zend_lookup_module(mod_lc);
+	if (mod) {
+		void *vis = zend_hash_find_ptr(&mod->members, lc);
+		if (vis && (uintptr_t) vis == ZEND_MODULE_MEMBER_INTERNAL) {
+			/* Internal: allowed only from inside the owning module. */
+			denied = true;
+			zend_execute_data *ex = EG(current_execute_data);
+			while (ex && (!ex->func || !ZEND_USER_CODE(ex->func->common.type))) {
+				ex = ex->prev_execute_data;
+			}
+			zend_class_entry *scope = (ex && ex->func) ? ex->func->common.scope : NULL;
+			if (scope) {
+				const char *sval = ZSTR_VAL(scope->name);
+				const char *ssep = zend_memnstr(sval, "::", 2, sval + ZSTR_LEN(scope->name));
+				if (ssep && (size_t)(ssep - sval) == mod_len
+						&& zend_binary_strncasecmp(sval, mod_len, val, mod_len, mod_len) == 0) {
+					denied = false; /* caller is inside the same module */
+				}
+			}
+		}
+	}
+	zend_string_release_ex(mod_lc, 0);
+	zend_string_release_ex(lc, 0);
+	return denied;
 }
 
 zend_class_entry *zend_fetch_class_by_name(zend_string *class_name, zend_string *key, uint32_t fetch_type) /* {{{ */
@@ -1864,6 +1923,11 @@ zend_class_entry *zend_fetch_class_by_name(zend_string *class_name, zend_string 
 	zend_class_entry *ce = zend_lookup_class_ex(class_name, key, fetch_type);
 	if (!ce) {
 		report_class_fetch_error(class_name, fetch_type);
+		return NULL;
+	}
+	if (UNEXPECTED(zend_module_runtime_access_denied(class_name))) {
+		zend_throw_error(NULL,
+			"Cannot access internal module member \"%s\" from outside its module", ZSTR_VAL(class_name));
 		return NULL;
 	}
 	return ce;
