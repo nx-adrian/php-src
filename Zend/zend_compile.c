@@ -9724,6 +9724,11 @@ static void zend_compile_class_decl(znode *result, const zend_ast *ast, bool top
 	}
 
 	ce->ce_flags |= decl->flags;
+	/* PHP Modules: mark an internal member class (CE-resident internal-ness). Not the
+	 * backing class itself (ZEND_ACC_MODULE), which is the module, not a member. */
+	if (FC(current_member_internal) && !(decl->flags & ZEND_ACC_MODULE)) {
+		ce->ce_flags2 |= ZEND_ACC2_MODULE_INTERNAL;
+	}
 	ce->info.user.filename = zend_string_copy(zend_get_compiled_filename());
 	ce->info.user.line_start = decl->start_lineno;
 	ce->info.user.line_end = decl->end_lineno;
@@ -10454,7 +10459,11 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 				}
 			}
 
+			/* Stamp member class-likes with ZEND_ACC2_MODULE_INTERNAL (CE-resident
+			 * internal-ness) via a transient signal read in zend_compile_class_decl. */
+			FC(current_member_internal) = (visibility == ZEND_MODULE_MEMBER_INTERNAL);
 			zend_compile_top_stmt(decl);
+			FC(current_member_internal) = false;
 		}
 
 		/* Backing class holding the module's static members. Compiled while
