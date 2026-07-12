@@ -383,7 +383,7 @@ typedef struct _zend_oparray_context {
 /*                                                        |     |     |     */
 /* #define ZEND_ACC2_EXAMPLE             (1 << 0)      X  |     |     |     */
 /*                                                        |     |     |     */
-/* Function Flags (unused: 30)                            |     |     |     */
+/* Function Flags (unused: none — 30 now ZEND_ACC_MODULE_INTERNAL)         */
 /* ==============                                         |     |     |     */
 /*                                                        |     |     |     */
 /* Function returning by reference                        |     |     |     */
@@ -450,7 +450,10 @@ typedef struct _zend_oparray_context {
 /* PHP Modules (experimental): method has "internal" visibility — callable      */
 /* from any code inside the same module, denied from outside. Stored alongside  */
 /* ZEND_ACC_PUBLIC (so normal dispatch treats it as callable) plus this marker. */
-#define ZEND_ACC_MODULE_INTERNAL         (1u << 31) /*    |  X  |     |     */
+/* MUST NOT be bit 31: that aliases ZEND_ACC_STRICT_TYPES on a method's fn_flags */
+/* in a declare(strict_types=1) file, which would make every method read as      */
+/* internal. Uses the last free function-flag bit, 30.                           */
+#define ZEND_ACC_MODULE_INTERNAL         (1u << 30) /*    |  X  |     |     */
 /*                                                        |     |     |     */
 /* op_array uses strict mode types                        |     |     |     */
 #define ZEND_ACC_STRICT_TYPES            (1U << 31) /*    |  X  |     |     */
