@@ -1753,3 +1753,41 @@ constant expressions", because the chain node is not a plain ZVAL. Mirrored the 
 into the const-expr path: before that error, try zend_try_module_chain_class(class_ast) and, if it
 resolves, fold the whole ::class node to the canonical string constant. Identity is not gated, so it
 works for an internal member too. A genuine (expression)::class is still rejected. Test: module_064.
+
+## Cold-autoload static-access chains resolve at runtime (B1)
+
+**Bug.** A static-access chain whose class part is a module member —
+`Module::Member::CONST`, `::method()`, `::$prop`, `::class` (3+ `::` segments) — was reinterpreted
+into a canonical class name at *compile* time (`zend_try_module_chain_class`). That only fires when
+the module is already registered while the referencing file compiles. **Cold** — the normal case
+where a consumer references a module reachable only through the autoloader — the module is not yet
+loaded, the reinterpretation is skipped, and the chain falls through to a plain class-constant fetch,
+throwing the misleading `Error: Undefined constant Module::Member`. Only direct class references
+(`new` / `instanceof` / type hints / `extends`), which the parser builds and resolves at runtime,
+autoloaded correctly; every deeper static access failed. Compile-time reinterpretation cannot be made
+to autoload (the engine forbids autoload during compilation), so the fix is at runtime.
+
+**Fix (three runtime hooks, no grammar change, no new opcode).**
+- `zend_execute_API.c`: new `zend_module_member_canonical_name(module_ce, name)` — returns the
+  canonical `"M::C"` string when `name` is a declared member (roster lookup) of module backing class
+  `module_ce`, else NULL.
+- `zend_vm_def.h`, `ZEND_FETCH_CLASS_CONSTANT`: in the constant-not-found branch, if the class is a
+  module backing class and the name is a declared member, yield the canonical name string (identity,
+  ungated, exactly as `::class` does) instead of throwing. The enclosing access then resolves that
+  class through the existing two-tier autoload and applies the visibility gate. This one site covers
+  the class-const, static-method, and static-property chains (all compile their prefix through it).
+- `zend_vm_def.h`, `ZEND_FETCH_CLASS_NAME`: accept a `"::"`-bearing string as its own class name, so
+  `Module::Member::class` cold yields `"M::C"`; a plain `"foo"::class` keeps its TypeError.
+- `zend_execute_API.c`, `zend_lookup_class_ex`: the pre-autoload validity guard rejected any name
+  with `::` (not a valid plain class-name char) on the keyless (dynamic) path, so the runtime
+  `"M::C"` string produced above never reached the two-tier block. Let `"::"` names through — needed
+  for a split-file member reached by a chain (tier-2 autoload). Non-module `"::"` names find no module
+  in tier 1 and fall through to a normal, cleanly-reported autoload.
+
+Net: identity is still ungated (`::class`, `instanceof`), `internal` members reached via a chain from
+outside now give the clean `Cannot access internal module member` error (not `Undefined constant`),
+and a genuine typo still reports `Undefined constant`. **Verified:** new test `module_065`
+(cold-autoload of every chain form, inline + nested + split-file, plus enforcement/diagnostics);
+playground `module-playground/07_cold_static_chain/` (fails pre-fix, passes after). Full suite green:
+66 module tests, `Zend/tests` clean (only the pre-existing `arginfo_zpp_mismatch` failures), reflection
+and spl suites clean; enum `Foo::Bar::class`, const-chains, and `"foo"::class` behavior unchanged.

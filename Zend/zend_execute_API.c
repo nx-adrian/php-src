@@ -1268,8 +1268,18 @@ ZEND_API zend_class_entry *zend_lookup_class_ex(zend_string *name, zend_string *
 
 	/* Verify class name before passing it to the autoloader. */
 	if (!key && !ZSTR_HAS_CE_CACHE(name) && !zend_is_valid_class_name(name)) {
-		zend_string_release_ex(lc_name, 0);
-		return NULL;
+		/* PHP Modules: a "Module::Member" canonical name contains "::", which is not a
+		 * valid plain class-name character, but IS a valid module member reference that
+		 * the two-tier block below resolves (and autoloads). This is reached when such a
+		 * name arrives through a dynamic class fetch with no precomputed key - e.g. the
+		 * runtime "Module::Member" string produced when a cold-autoloaded static-access
+		 * chain (Module::Member::CONST / ::method() / ::$prop) is resolved. Let "::" names
+		 * through; a non-module "::" name simply finds no module in tier 1 and falls
+		 * through to a normal (failing) autoload, reported cleanly. */
+		if (!zend_memnstr(ZSTR_VAL(name), "::", 2, ZSTR_VAL(name) + ZSTR_LEN(name))) {
+			zend_string_release_ex(lc_name, 0);
+			return NULL;
+		}
 	}
 
 	if (zend_hash_add_empty_element(&EG(autoload_current_classnames), lc_name) == NULL) {
@@ -1984,6 +1994,41 @@ ZEND_API bool zend_module_runtime_access_denied(const zend_class_entry *ce)
 		}
 	}
 	return false;
+}
+
+/* PHP Modules: resolve "Module::Member" (a member reference written as a class-constant
+ * chain, e.g. the "M::C" prefix of "M::C::X" / "M::C::m()" / "M::C::$p" / "M::C::class")
+ * when the module is only autoloaded at runtime. The prefix compiles to a class-constant
+ * fetch on the module's backing class; that constant does not exist, so before erroring
+ * the constant-fetch path calls this to see whether member_name names a declared member
+ * of the module. If so it returns the canonical name string ("M::C", owned) - identity,
+ * ungated, exactly as ::class / compile-time reinterpretation would yield - which the
+ * outer access then resolves through the normal two-tier autoload + visibility gate.
+ * Returns NULL if module_ce is not a module backing class or member_name is not a
+ * declared member (so a genuine "Undefined constant" still surfaces). */
+ZEND_API zend_string *zend_module_member_canonical_name(
+		const zend_class_entry *module_ce, zend_string *member_name)
+{
+	if (!(module_ce->ce_flags & ZEND_ACC_MODULE)) {
+		return NULL;
+	}
+	zend_string *lc_mod = zend_string_tolower(module_ce->name);
+	zend_php_module *mod = zend_lookup_module(lc_mod);
+	zend_string_release(lc_mod);
+	if (!mod) {
+		return NULL;
+	}
+	zend_string *canonical = zend_string_concat3(
+		ZSTR_VAL(module_ce->name), ZSTR_LEN(module_ce->name), "::", 2,
+		ZSTR_VAL(member_name), ZSTR_LEN(member_name));
+	zend_string *lc_canonical = zend_string_tolower(canonical);
+	bool is_member = zend_hash_exists(&mod->members, lc_canonical);
+	zend_string_release(lc_canonical);
+	if (!is_member) {
+		zend_string_release(canonical);
+		return NULL;
+	}
+	return canonical;
 }
 
 zend_class_entry *zend_fetch_class_by_name(zend_string *class_name, zend_string *key, uint32_t fetch_type) /* {{{ */

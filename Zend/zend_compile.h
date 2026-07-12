@@ -168,6 +168,10 @@ ZEND_API bool zend_module_scope_can_see_module(const zend_class_entry *module_ce
  * class, or a public member of an internal nested module). Used to gate name-based fetch
  * and object-based construction ("new $escaped") uniformly. */
 ZEND_API bool zend_module_runtime_access_denied(const zend_class_entry *ce);
+/* PHP Modules: if `module_ce` is a module backing class and `member_name` names a
+ * declared member, return the canonical "Module::Member" name (owned); else NULL.
+ * Lets an autoloaded "Module::Member::..." chain resolve at runtime (see B1 fix). */
+ZEND_API zend_string *zend_module_member_canonical_name(const zend_class_entry *module_ce, zend_string *member_name);
 ZEND_API zend_ast *zend_ast_create_module_qualified_name(zend_ast *module_ast, zend_ast *member_ast);
 /* "module::Member": a class-like reference to a member of the current module,
  * resolved at compile time against FC(current_module). */
