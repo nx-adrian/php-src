@@ -742,3 +742,37 @@ method flag is bit 30 and the prop/const flag is a *separate* low-bit constant.
   `ce_flags2`), reserving the scarce low prop/const `attr` bits for genuine
   per-member visibility. The RFC's `export` reads as a class↔module relationship, so
   it should be a class flag and not compete for those bits.
+
+## Increment 13 — internal properties (permanent context-specific low bit)
+
+Implements `internal` on properties (static and instance) via the agreed permanent
+context-specific low bit, and fixes the member-class assertion crash.
+
+- **Flag.** `ZEND_ACC_MODULE_INTERNAL_MEMBER (1 << 14)` — property + constant
+  context. Low bit so it survives the 16-bit compile-time `zend_ast->attr`; distinct
+  from the method flag `ZEND_ACC_MODULE_INTERNAL` (function bit 30). No translation
+  step: it is the permanent flag, visible in the final `property_info->flags`.
+- **Modifier.** `zend_modifier_token_to_flag` now maps `T_INTERNAL` to
+  `ZEND_ACC_PUBLIC | ZEND_ACC_MODULE_INTERNAL_MEMBER` for PROPERTY and CONSTANT
+  targets (previously only METHOD), and `zend_modifier_token_to_string` handles
+  `T_INTERNAL` — this removes the assertion crash that hit any `internal`
+  property/constant on a member class.
+- **Routing.** The backing-class partition sets the low bit on internal static
+  props/consts (fits the attr) instead of rejecting.
+- **Enforcement (properties, fully done):**
+  - static: `zend_std_get_static_property_with_info` checks the low bit.
+  - instance: both `zend_get_property_offset` (hot VM path) and
+    `zend_get_property_info` (reflection/API) gate on the low bit via
+    `zend_module_scope_allows` — a single UNEXPECTED branch each, before the
+    private/protected block (internal is public, so that block wouldn't catch it).
+    Covers read and write; cache-slot reuse is safe (per-call-site scope, same as
+    private/protected).
+- **Constants still deferred.** `internal const` is now flag-plumbed but
+  `zend_compile_class_const_decl` rejects it with a clean error — const enforcement
+  needs the three-route fetch gate (fold refusal + FETCH_CLASS_CONSTANT VM handler +
+  zend_get_class_constant_ex), which is the remaining piece.
+
+Result: internal now works for member classes, methods, and properties (static +
+instance); only internal *constants* remain. Tests module_027 (properties),
+module_025 (const still rejected). 29 module + ~1700 core (property/object/
+reflection/type/ns/class/trait) tests green across this and the strict_types fix.

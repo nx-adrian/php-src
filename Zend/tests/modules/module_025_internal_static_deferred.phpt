@@ -1,10 +1,10 @@
 --TEST--
-Modules: internal static properties/constants are rejected until enforcement lands
+Modules: internal constants are rejected until the fetch gate lands (properties now work)
 --FILE--
 <?php
 module M {
-    internal static int $s = 1;
+    internal const K = 1;
 }
 ?>
 --EXPECTF--
-Fatal error: internal module properties are not yet supported; declare the property public in %s on line %d
+Fatal error: internal module constants are not yet supported; declare the constant public in %s on line %d
