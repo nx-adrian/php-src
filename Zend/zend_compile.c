@@ -3092,6 +3092,29 @@ static zend_string *zend_try_module_chain_class(zend_ast *class_ast) /* {{{ */
 }
 /* }}} */
 
+static bool zend_module_type_name_is_own_nonpublic(zend_string *tname); /* defined below */
+
+/* PHP Modules: a *public* trait is flattened into classes outside its module, so an
+ * access in its body to one of the module's own internal members would fail at runtime
+ * there (the using class's scope is not the module). Require every module-member class
+ * reference in a public trait's body to be *provably public*; an internal member is a
+ * compile error. Public module members are fine (reachable anywhere). An internal trait
+ * is exempt -- it is only usable within its own module. (Internal module *constants*
+ * accessed via "module::CONST" are enforced at runtime, not here.) */
+static void zend_module_guard_public_trait_ref(zend_string *resolved)
+{
+	zend_class_entry *cur = CG(active_class_entry);
+	if (cur && (cur->ce_flags & ZEND_ACC_TRAIT)
+	 && !(cur->ce_flags2 & ZEND_ACC2_MODULE_INTERNAL)
+	 && zend_module_type_name_is_own_nonpublic(resolved)) {
+		zend_error_noreturn(E_COMPILE_ERROR,
+			"A public trait may not access the internal module member \"%s\" in its body; "
+			"the access fails when the trait is used outside module \"%s\" -- declare the "
+			"trait `internal`, or reference only public members",
+			ZSTR_VAL(resolved), ZSTR_VAL(FC(current_module)));
+	}
+}
+
 static void zend_compile_class_ref(znode *result, zend_ast *name_ast, uint32_t fetch_flags) /* {{{ */
 {
 	uint32_t fetch_type;
@@ -3099,6 +3122,7 @@ static void zend_compile_class_ref(znode *result, zend_ast *name_ast, uint32_t f
 	zend_string *module_chain = zend_try_module_chain_class(name_ast);
 	if (module_chain) {
 		/* Canonical member-class name; treat as a fully-qualified class reference. */
+		zend_module_guard_public_trait_ref(module_chain);
 		result->op_type = IS_CONST;
 		ZVAL_STR(&result->u.constant, module_chain);
 		return;
@@ -3120,8 +3144,10 @@ static void zend_compile_class_ref(znode *result, zend_ast *name_ast, uint32_t f
 			fetch_type = zend_get_class_fetch_type(name);
 
 			if (fetch_type == ZEND_FETCH_CLASS_DEFAULT) {
+				zend_string *_rn = zend_resolve_class_name(name, ZEND_NAME_FQ);
+				zend_module_guard_public_trait_ref(_rn);
 				result->op_type = IS_CONST;
-				ZVAL_STR(&result->u.constant, zend_resolve_class_name(name, ZEND_NAME_FQ));
+				ZVAL_STR(&result->u.constant, _rn);
 			} else {
 				zend_ensure_valid_class_fetch_type(fetch_type);
 				result->op_type = IS_UNUSED;
@@ -3138,15 +3164,19 @@ static void zend_compile_class_ref(znode *result, zend_ast *name_ast, uint32_t f
 
 	/* Fully qualified names are always default refs */
 	if (name_ast->attr == ZEND_NAME_FQ) {
+		zend_string *_rn = zend_resolve_class_name_ast(name_ast);
+		zend_module_guard_public_trait_ref(_rn);
 		result->op_type = IS_CONST;
-		ZVAL_STR(&result->u.constant, zend_resolve_class_name_ast(name_ast));
+		ZVAL_STR(&result->u.constant, _rn);
 		return;
 	}
 
 	fetch_type = zend_get_class_fetch_type(zend_ast_get_str(name_ast));
 	if (ZEND_FETCH_CLASS_DEFAULT == fetch_type) {
+		zend_string *_rn = zend_resolve_class_name_ast(name_ast);
+		zend_module_guard_public_trait_ref(_rn);
 		result->op_type = IS_CONST;
-		ZVAL_STR(&result->u.constant, zend_resolve_class_name_ast(name_ast));
+		ZVAL_STR(&result->u.constant, _rn);
 	} else {
 		zend_ensure_valid_class_fetch_type(fetch_type);
 		result->op_type = IS_UNUSED;
@@ -5917,17 +5947,27 @@ static bool zend_module_type_name_is_own_nonpublic(zend_string *tname)
 	 || zend_binary_strncasecmp(v, owner_len, ZSTR_VAL(cur), ZSTR_LEN(cur), owner_len) != 0) {
 		return false;                      /* a member of some *other* module */
 	}
-	/* Same-module type: require a PUBLIC entry in this module's compile-time roster. */
+	/* Same-module type. Fire only when it is a *provably internal member* -- not merely
+	 * "absent from the public roster", which would also catch a bare global name that
+	 * resolved module-relative (e.g. "Exception" -> "M::Exception", which is not a member
+	 * at all and is left to normal resolution). A member is provably internal when the
+	 * compile-time roster records it internal, or a compiled class entry carries the
+	 * module-internal flag. A public member (always in the roster), a not-yet-loaded
+	 * member, and a non-member name all return false. */
 	zend_string *lc_owner = zend_string_tolower(cur);
 	zend_php_module *m = zend_lookup_module(lc_owner);
 	zend_string_release(lc_owner);
-	if (!m) {
-		return false;
-	}
 	zend_string *lc = zend_string_tolower(tname);
-	void *vis = zend_hash_find_ptr(&m->members, lc);
+	void *vis = m ? zend_hash_find_ptr(&m->members, lc) : NULL;
+	bool result;
+	if (vis) {
+		result = ((uintptr_t) vis == ZEND_MODULE_MEMBER_INTERNAL);
+	} else {
+		zend_class_entry *ce = zend_hash_find_ptr(CG(class_table), lc);
+		result = (ce && (ce->ce_flags2 & ZEND_ACC2_MODULE_INTERNAL));
+	}
 	zend_string_release(lc);
-	return !(vis && (uintptr_t) vis == ZEND_MODULE_MEMBER_PUBLIC);
+	return result;
 }
 
 static void zend_module_check_public_surface_type(const zend_type type, const char *where)
