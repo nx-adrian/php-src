@@ -29,7 +29,7 @@ function bad(string $label, string $code): void {
     file_put_contents($f, "<?php\n" . $code);
     $out = (string) shell_exec(escapeshellarg(PHP_BINARY) . ' -n ' . escapeshellarg($f) . ' 2>&1');
     @unlink($f);
-    echo $label, ": ", str_contains($out, 'may not access the internal module member') ? "rejected" : ("UNEXPECTED: " . trim($out)), "\n";
+    echo $label, ": ", str_contains($out, 'is not a public member of module') ? "rejected" : ("UNEXPECTED: " . trim($out)), "\n";
 }
 function ok(string $label, string $code): void {
     $f = tempnam(sys_get_temp_dir(), 'tba') . '.php';
@@ -44,6 +44,7 @@ bad('new internal',       'module M { internal class N {} public trait T { publi
 bad('module::N::m()',     'module M { internal class N { public static function m(){} } public trait T { public function f() { return module::N::m(); } } }');
 bad('instanceof internal','module M { internal class N {} public trait T { public function f($x): bool { return $x instanceof N; } } }');
 bad('N::CONST internal',  'module M { internal class N { public const K = 1; } public trait T { public function f() { return N::K; } } }');
+bad('bare non-member',    'module M { public trait T { public function f() { return new Whatever(); } } }');
 
 echo "--\n";
 ok('public member access', 'module M { public class P { public static function hi(){ return "h"; } } public trait T { public function f(): string { return module::P::hi(); } } } class X { use M::T; }');
@@ -59,6 +60,7 @@ new internal: rejected
 module::N::m(): rejected
 instanceof internal: rejected
 N::CONST internal: rejected
+bare non-member: rejected
 --
 public member access: ok
 public claimed access: ok

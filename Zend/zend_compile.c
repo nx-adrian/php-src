@@ -3108,9 +3108,9 @@ static void zend_module_guard_public_trait_ref(zend_string *resolved)
 	 && !(cur->ce_flags2 & ZEND_ACC2_MODULE_INTERNAL)
 	 && zend_module_type_name_is_own_nonpublic(resolved)) {
 		zend_error_noreturn(E_COMPILE_ERROR,
-			"A public trait may not access the internal module member \"%s\" in its body; "
-			"the access fails when the trait is used outside module \"%s\" -- declare the "
-			"trait `internal`, or reference only public members",
+			"A public trait's body may reference only public members of its module: \"%s\" "
+			"is not a public member of module \"%s\" (the reference fails when the trait is "
+			"used outside the module). \\-qualify a global name, or declare the trait `internal`",
 			ZSTR_VAL(resolved), ZSTR_VAL(FC(current_module)));
 	}
 }
@@ -5947,27 +5947,25 @@ static bool zend_module_type_name_is_own_nonpublic(zend_string *tname)
 	 || zend_binary_strncasecmp(v, owner_len, ZSTR_VAL(cur), ZSTR_LEN(cur), owner_len) != 0) {
 		return false;                      /* a member of some *other* module */
 	}
-	/* Same-module type. Fire only when it is a *provably internal member* -- not merely
-	 * "absent from the public roster", which would also catch a bare global name that
-	 * resolved module-relative (e.g. "Exception" -> "M::Exception", which is not a member
-	 * at all and is left to normal resolution). A member is provably internal when the
-	 * compile-time roster records it internal, or a compiled class entry carries the
-	 * module-internal flag. A public member (always in the roster), a not-yet-loaded
-	 * member, and a non-member name all return false. */
+	/* Same-module type: it must be *provably public* -- a PUBLIC entry in this module's
+	 * compile-time roster (which holds every inline member and every claim, so public
+	 * membership is always decidable). Anything else is rejected: an internal member, an
+	 * unclaimed member (internal by default), or a bare name that is not a member at all.
+	 * The last is intentional -- a bare unqualified/qualified name inside a module is
+	 * module-relative ("Exception" -> "M::Exception"; there is no global fallback for
+	 * class names), so a non-member reference is an error the author fixes by writing
+	 * "\Global" or a `use` import (both of which resolve away from "M::" and are not
+	 * checked here). */
 	zend_string *lc_owner = zend_string_tolower(cur);
 	zend_php_module *m = zend_lookup_module(lc_owner);
 	zend_string_release(lc_owner);
-	zend_string *lc = zend_string_tolower(tname);
-	void *vis = m ? zend_hash_find_ptr(&m->members, lc) : NULL;
-	bool result;
-	if (vis) {
-		result = ((uintptr_t) vis == ZEND_MODULE_MEMBER_INTERNAL);
-	} else {
-		zend_class_entry *ce = zend_hash_find_ptr(CG(class_table), lc);
-		result = (ce && (ce->ce_flags2 & ZEND_ACC2_MODULE_INTERNAL));
+	if (!m) {
+		return false;
 	}
+	zend_string *lc = zend_string_tolower(tname);
+	void *vis = zend_hash_find_ptr(&m->members, lc);
 	zend_string_release(lc);
-	return result;
+	return !(vis && (uintptr_t) vis == ZEND_MODULE_MEMBER_PUBLIC);
 }
 
 static void zend_module_check_public_surface_type(const zend_type type, const char *where)

@@ -48,6 +48,7 @@ echo "--\n";
 bad('return internal',   'module M { internal class N {} public class C { public function f(): N { throw new \Exception; } } }');
 bad('public property',   'module M { internal class N {} public class C { public N $p; } }');
 bad('claimed internal',  'module M { internal Widget; public class C { public function f(): Widget { throw new \Exception; } } }');
+bad('bare non-member',   'module M { public class C { public function f(): Whatever { throw new \Exception; } } }');
 bad('nullable ?N',       'module M { internal class N {} public class C { public function f(): ?N { return null; } } }');
 bad('union I|N',         'module M { public interface I {} internal class N implements I {} public class C { public function f(): I|N { throw new \Exception; } } }');
 bad('covariant narrow',  'module M { public interface I {} internal class N implements I {} public class B { public function m(): I { throw new \Exception; } } public class D extends B { public function m(): N { throw new \Exception; } } }');
@@ -68,6 +69,7 @@ M::N
 return internal: rejected
 public property: rejected
 claimed internal: rejected
+bare non-member: rejected
 nullable ?N: rejected
 union I|N: rejected
 covariant narrow: rejected
