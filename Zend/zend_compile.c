@@ -5891,6 +5891,62 @@ static void zend_compile_static_call(znode *result, zend_ast *ast, uint32_t type
 }
 /* }}} */
 
+/* PHP Modules: a module's public surface may not name its OWN internal or unclaimed
+ * types. Framed positively: a type that is a member of *this* module must resolve to a
+ * PUBLIC member (public inline declaration or a `public` claim). Internal, unclaimed
+ * (=> internal by default), or absent-from-roster all fail closed. Only same-module
+ * types are checked -- another module's members may be uncompiled (cold) at this point,
+ * so their visibility is not decidable here, and they are left to the runtime gate. */
+static bool zend_module_type_name_is_own_nonpublic(zend_string *tname)
+{
+	if (!FC(current_module)) {
+		return false;
+	}
+	const zend_string *cur = FC(current_module);
+	const char *v = ZSTR_VAL(tname);
+	size_t len = ZSTR_LEN(tname);
+	const char *last = NULL;
+	for (const char *q = v; (q = zend_memnstr(q, "::", 2, v + len)) != NULL; q += 2) {
+		last = q;
+	}
+	if (!last) {
+		return false;                      /* not a module-qualified name */
+	}
+	size_t owner_len = (size_t)(last - v);
+	if (owner_len != ZSTR_LEN(cur)
+	 || zend_binary_strncasecmp(v, owner_len, ZSTR_VAL(cur), ZSTR_LEN(cur), owner_len) != 0) {
+		return false;                      /* a member of some *other* module */
+	}
+	/* Same-module type: require a PUBLIC entry in this module's compile-time roster. */
+	zend_string *lc_owner = zend_string_tolower(cur);
+	zend_php_module *m = zend_lookup_module(lc_owner);
+	zend_string_release(lc_owner);
+	if (!m) {
+		return false;
+	}
+	zend_string *lc = zend_string_tolower(tname);
+	void *vis = zend_hash_find_ptr(&m->members, lc);
+	zend_string_release(lc);
+	return !(vis && (uintptr_t) vis == ZEND_MODULE_MEMBER_PUBLIC);
+}
+
+static void zend_module_check_public_surface_type(const zend_type type, const char *where)
+{
+	const zend_type *single_type;
+	ZEND_TYPE_FOREACH(type, single_type) {
+		if (ZEND_TYPE_HAS_NAME(*single_type)) {
+			zend_string *tname = ZEND_TYPE_NAME(*single_type);
+			if (zend_module_type_name_is_own_nonpublic(tname)) {
+				zend_error_noreturn(E_COMPILE_ERROR,
+					"%s references \"%s\", which is not a public member of module \"%s\"; "
+					"a module's public surface may not expose internal or unclaimed types "
+					"(declare a public supertype instead)",
+					where, ZSTR_VAL(tname), ZSTR_VAL(FC(current_module)));
+			}
+		}
+	} ZEND_TYPE_FOREACH_END();
+}
+
 static void zend_compile_class_decl(znode *result, const zend_ast *ast, bool toplevel);
 
 static void zend_compile_new(znode *result, zend_ast *ast) /* {{{ */
@@ -9984,6 +10040,37 @@ static void zend_compile_class_decl(znode *result, const zend_ast *ast, bool top
 					"a trait with internal members must be declared `internal` so it can only be "
 					"used within its own module",
 					ZSTR_VAL(ce->name), ZSTR_VAL(ce->name), ZSTR_VAL(_mck));
+			}
+		} ZEND_HASH_FOREACH_END();
+	}
+
+	/* PHP Modules: the public surface of a public module class-like (its public methods'
+	 * return types and its public properties' types) may not name this module's own
+	 * internal/unclaimed types. Compile-time, same-module only; parameters are not
+	 * checked (an internal-typed parameter is an input the caller can only have obtained
+	 * from the module, and supports legitimate round-trips). Traits are excluded here. */
+	if (FC(current_module)
+	 && !(ce->ce_flags & (ZEND_ACC_TRAIT | ZEND_ACC_MODULE))
+	 && !(ce->ce_flags2 & ZEND_ACC2_MODULE_INTERNAL)) {
+		zend_function *_sfn;
+		ZEND_HASH_FOREACH_PTR(&ce->function_table, _sfn) {
+			if (!(_sfn->common.fn_flags & (ZEND_ACC_PRIVATE | ZEND_ACC_PROTECTED | ZEND_ACC_MODULE_INTERNAL))
+			 && (_sfn->common.fn_flags & ZEND_ACC_HAS_RETURN_TYPE)
+			 && _sfn->common.arg_info) {
+				zend_string *w = zend_strpprintf(0, "the return type of %s::%s()",
+					ZSTR_VAL(ce->name), ZSTR_VAL(_sfn->common.function_name));
+				zend_module_check_public_surface_type((_sfn->common.arg_info - 1)->type, ZSTR_VAL(w));
+				zend_string_release(w);
+			}
+		} ZEND_HASH_FOREACH_END();
+		zend_property_info *_sprop;
+		ZEND_HASH_FOREACH_PTR(&ce->properties_info, _sprop) {
+			if (!(_sprop->flags & (ZEND_ACC_PRIVATE | ZEND_ACC_PROTECTED | ZEND_ACC_MODULE_INTERNAL_MEMBER))
+			 && ZEND_TYPE_IS_SET(_sprop->type)) {
+				zend_string *w = zend_strpprintf(0, "the type of property %s::$%s",
+					ZSTR_VAL(ce->name), ZSTR_VAL(_sprop->name));
+				zend_module_check_public_surface_type(_sprop->type, ZSTR_VAL(w));
+				zend_string_release(w);
 			}
 		} ZEND_HASH_FOREACH_END();
 	}

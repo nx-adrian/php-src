@@ -11,9 +11,9 @@ module M {
         public int $n = 2;                      // no __clone: cloneable from anywhere
     }
     public class Api {
-        public static function make(): Widget { return new module::Widget; }
+        public static function make(): object { return new module::Widget; }
         public static function makeFreely(): Freely { return new module::Freely; }
-        public static function cloneInside(Widget $w): Widget { return clone $w; }  // same module: allowed
+        public static function cloneInside(Widget $w): object { return clone $w; }  // same module: allowed
     }
 }
 

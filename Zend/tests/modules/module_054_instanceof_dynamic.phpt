@@ -4,7 +4,7 @@ Modules: dynamic "instanceof $name" sees through an internal type (identity), li
 <?php
 module M {
     internal class Sec {}
-    public class Api { public static function make(): Sec { return new module::Sec; } }
+    public class Api { public static function make(): object { return new module::Sec; } }
 }
 $o = M::Api::make();
 $n = "M::Sec";

@@ -7,9 +7,9 @@ module M {
         public function pub(): string { return "pub"; }
     }
     public class Api {
-        public static function make(): Widget { return new module::Widget; }
+        public static function make(): object { return new module::Widget; }
         // Same-module re-instantiation from an escaped object must still work.
-        public static function reNew(Widget $w): Widget { return new $w; }
+        public static function reNew(Widget $w): object { return new $w; }
     }
 }
 
