@@ -3551,13 +3551,27 @@ ZEND_API zend_class_entry *zend_do_link_class(zend_class_entry *ce, zend_string 
 
 		for (i = 0; i < ce->num_traits; i++) {
 			zend_class_entry *trait = zend_fetch_class_by_name(ce->trait_names[i].name,
-				ce->trait_names[i].lc_name, ZEND_FETCH_CLASS_TRAIT | ZEND_FETCH_CLASS_EXCEPTION);
+				ce->trait_names[i].lc_name,
+				ZEND_FETCH_CLASS_TRAIT | ZEND_FETCH_CLASS_EXCEPTION | ZEND_FETCH_CLASS_NO_MODULE_GATE);
 			if (UNEXPECTED(trait == NULL)) {
 				free_alloca(traits_and_interfaces, use_heap);
 				return NULL;
 			}
 			if (UNEXPECTED(!(trait->ce_flags & ZEND_ACC_TRAIT))) {
 				zend_throw_error(NULL, "%s cannot use %s - it is not a trait", ZSTR_VAL(ce->name), ZSTR_VAL(trait->name));
+				free_alloca(traits_and_interfaces, use_heap);
+				return NULL;
+			}
+			/* PHP Modules: an `internal` trait may only be used by a class in its own
+			 * module. Checked at the binding site against the *using class* `ce` (like the
+			 * extends gate), because trait binding runs in whatever scope the class
+			 * declaration executes in -- usually global -- which the runtime gate would
+			 * wrongly read as "outside its module". */
+			if (UNEXPECTED(trait->ce_flags2 & ZEND_ACC2_MODULE_INTERNAL)
+			 && !zend_module_scope_allows(trait, ce)) {
+				zend_throw_error(NULL,
+					"Cannot access internal module member \"%s\" from outside its module",
+					ZSTR_VAL(trait->name));
 				free_alloca(traits_and_interfaces, use_heap);
 				return NULL;
 			}

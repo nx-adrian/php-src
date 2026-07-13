@@ -2078,8 +2078,11 @@ zend_class_entry *zend_fetch_class_by_name(zend_string *class_name, zend_string 
 	 * trait-use), not identity/observation. A SILENT fetch — `catch` — must resolve the
 	 * class without throwing: catching an internal exception type from outside has to work,
 	 * or a module could throw an exception no external caller can name and catch. So the
-	 * gate is skipped for SILENT fetches, mirroring how `instanceof` resolves ungated. */
-	if (!(fetch_type & ZEND_FETCH_CLASS_SILENT)
+	 * gate is skipped for SILENT fetches, mirroring how `instanceof` resolves ungated.
+	 * NO_MODULE_GATE skips it too: trait-use resolves the trait here but applies the
+	 * boundary at the binding site against the *using class* (like extends), not the
+	 * runtime scope in which the class declaration happens to execute. */
+	if (!(fetch_type & (ZEND_FETCH_CLASS_SILENT | ZEND_FETCH_CLASS_NO_MODULE_GATE))
 	 && UNEXPECTED(zend_module_runtime_access_denied(ce))) {
 		zend_throw_error(NULL,
 			"Cannot access internal module member \"%s\" from outside its module", ZSTR_VAL(class_name));

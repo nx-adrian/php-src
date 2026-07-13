@@ -9948,6 +9948,46 @@ static void zend_compile_class_decl(znode *result, const zend_ast *ast, bool top
 
 	CG(active_class_entry) = original_ce;
 
+	/* PHP Modules: a trait that declares any `internal` member must itself be `internal`.
+	 * An internal member's boundary is enforced relative to the class the trait dissolves
+	 * into; a *public* trait can be used by classes outside its module, where those members
+	 * would leak (used by a non-module class) or be transplanted into another module.
+	 * Requiring the trait to be internal confines it to its own module, where internal
+	 * members are coherent. The trait and its members are all inline here, so this is fully
+	 * known at compile time. (Runs before early binding, which returns early below.) */
+	if ((ce->ce_flags & ZEND_ACC_TRAIT) && !(ce->ce_flags2 & ZEND_ACC2_MODULE_INTERNAL)) {
+		zend_function *_mfn;
+		ZEND_HASH_FOREACH_PTR(&ce->function_table, _mfn) {
+			if (_mfn->common.fn_flags & ZEND_ACC_MODULE_INTERNAL) {
+				zend_error_noreturn(E_COMPILE_ERROR,
+					"Trait %s declares an internal method %s::%s() but is not itself internal; "
+					"a trait with internal members must be declared `internal` so it can only be "
+					"used within its own module",
+					ZSTR_VAL(ce->name), ZSTR_VAL(ce->name), ZSTR_VAL(_mfn->common.function_name));
+			}
+		} ZEND_HASH_FOREACH_END();
+		zend_property_info *_mprop;
+		ZEND_HASH_FOREACH_PTR(&ce->properties_info, _mprop) {
+			if (_mprop->flags & ZEND_ACC_MODULE_INTERNAL_MEMBER) {
+				zend_error_noreturn(E_COMPILE_ERROR,
+					"Trait %s declares an internal property %s::$%s but is not itself internal; "
+					"a trait with internal members must be declared `internal` so it can only be "
+					"used within its own module",
+					ZSTR_VAL(ce->name), ZSTR_VAL(ce->name), ZSTR_VAL(_mprop->name));
+			}
+		} ZEND_HASH_FOREACH_END();
+		zend_string *_mck; zend_class_constant *_mcc;
+		ZEND_HASH_FOREACH_STR_KEY_PTR(&ce->constants_table, _mck, _mcc) {
+			if (ZEND_CLASS_CONST_FLAGS(_mcc) & ZEND_ACC_MODULE_INTERNAL_MEMBER) {
+				zend_error_noreturn(E_COMPILE_ERROR,
+					"Trait %s declares an internal constant %s::%s but is not itself internal; "
+					"a trait with internal members must be declared `internal` so it can only be "
+					"used within its own module",
+					ZSTR_VAL(ce->name), ZSTR_VAL(ce->name), ZSTR_VAL(_mck));
+			}
+		} ZEND_HASH_FOREACH_END();
+	}
+
 	if (toplevel) {
 		ce->ce_flags |= ZEND_ACC_TOP_LEVEL;
 	}
