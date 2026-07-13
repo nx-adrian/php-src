@@ -51,12 +51,14 @@ bad('unclaimed member',  'module M { public class C { public function f(): Widge
 bad('nullable ?N',       'module M { internal class N {} public class C { public function f(): ?N { return null; } } }');
 bad('union I|N',         'module M { public interface I {} internal class N implements I {} public class C { public function f(): I|N { throw new Exception; } } }');
 bad('covariant narrow',  'module M { public interface I {} internal class N implements I {} public class B { public function m(): I { throw new Exception; } } public class D extends B { public function m(): N { throw new Exception; } } }');
+bad('public trait return', 'module M { internal class N {} public trait T { public function f(): N { throw new Exception; } } }');
 
 echo "--\n";
 ok('public claimed type',   'module M { public Widget; public class C { public function f(): Widget { throw new Exception; } } }');
 ok('object return',         'module M { internal class N {} public class C { public function f(): object { return new N(); } } }');
 ok('internal method',       'module M { internal class N {} public class C { internal function g(): N { return new N(); } } }');
 ok('cross-module (cold)',   'module M { public class C { public function f(): X::Y { throw new Exception; } } } module X { internal class Y {} }');
+ok('internal trait exempt', 'module M { internal class N {} internal trait T { public function f(): N { return new N(); } } public class U { use T; } }');
 ?>
 --EXPECT--
 M::N
@@ -68,8 +70,10 @@ unclaimed member: rejected
 nullable ?N: rejected
 union I|N: rejected
 covariant narrow: rejected
+public trait return: rejected
 --
 public claimed type: ok
 object return: ok
 internal method: ok
 cross-module (cold): ok
+internal trait exempt: ok

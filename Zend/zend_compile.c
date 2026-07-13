@@ -10048,9 +10048,12 @@ static void zend_compile_class_decl(znode *result, const zend_ast *ast, bool top
 	 * return types and its public properties' types) may not name this module's own
 	 * internal/unclaimed types. Compile-time, same-module only; parameters are not
 	 * checked (an internal-typed parameter is an input the caller can only have obtained
-	 * from the module, and supports legitimate round-trips). Traits are excluded here. */
+	 * from the module, and supports legitimate round-trips). Applies to public classes,
+	 * interfaces, enums, and traits -- a public trait is flattened into classes outside
+	 * the module, so its public methods are public surface too. Internal class-likes are
+	 * skipped (not reachable from outside), as is the module's backing class. */
 	if (FC(current_module)
-	 && !(ce->ce_flags & (ZEND_ACC_TRAIT | ZEND_ACC_MODULE))
+	 && !(ce->ce_flags & ZEND_ACC_MODULE)
 	 && !(ce->ce_flags2 & ZEND_ACC2_MODULE_INTERNAL)) {
 		zend_function *_sfn;
 		ZEND_HASH_FOREACH_PTR(&ce->function_table, _sfn) {
