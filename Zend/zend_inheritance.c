@@ -1467,6 +1467,17 @@ static void do_inherit_property(zend_property_info *parent_info, zend_string *ke
 			zend_error_noreturn(E_COMPILE_ERROR, "Cannot override final property %s::$%s",
 				ZSTR_VAL(parent_info->ce->name), ZSTR_VAL(key));
 		}
+		/* PHP Modules: an `internal` property, like an `internal` method, is sealed to the
+		 * outside. A subclass in another module (or in none) may not override it — that
+		 * would let outside code replace a member the module keeps private. A subclass
+		 * inside the same module may override it normally. Mirrors `final`, but scoped to
+		 * the module boundary rather than the class. */
+		if (UNEXPECTED(parent_info->flags & ZEND_ACC_MODULE_INTERNAL_MEMBER)
+		 && !zend_module_scope_allows(parent_info->ce, ce)) {
+			zend_error_noreturn(E_COMPILE_ERROR,
+				"Cannot override internal property %s::$%s from outside its module",
+				ZSTR_VAL(parent_info->ce->name), ZSTR_VAL(key));
+		}
 		if (!(parent_info->flags & ZEND_ACC_PRIVATE)) {
 			if (!(parent_info->ce->ce_flags & ZEND_ACC_INTERFACE)) {
 				child_info->prototype = parent_info->prototype;
