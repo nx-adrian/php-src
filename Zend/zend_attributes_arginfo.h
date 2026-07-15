@@ -135,6 +135,12 @@ static zend_class_entry *register_class_Attribute(void)
 	zend_declare_typed_class_constant(class_entry, const_TARGET_CONSTANT_name, &const_TARGET_CONSTANT_value, ZEND_ACC_PUBLIC, NULL, (zend_type) ZEND_TYPE_INIT_MASK(MAY_BE_LONG));
 	zend_string_release_ex(const_TARGET_CONSTANT_name, true);
 
+	zval const_TARGET_MODULE_value;
+	ZVAL_LONG(&const_TARGET_MODULE_value, ZEND_ATTRIBUTE_TARGET_MODULE);
+	zend_string *const_TARGET_MODULE_name = zend_string_init_interned("TARGET_MODULE", sizeof("TARGET_MODULE") - 1, true);
+	zend_declare_typed_class_constant(class_entry, const_TARGET_MODULE_name, &const_TARGET_MODULE_value, ZEND_ACC_PUBLIC, NULL, (zend_type) ZEND_TYPE_INIT_MASK(MAY_BE_LONG));
+	zend_string_release_ex(const_TARGET_MODULE_name, true);
+
 	zval const_TARGET_ALL_value;
 	ZVAL_LONG(&const_TARGET_ALL_value, ZEND_ATTRIBUTE_TARGET_ALL);
 	zend_string *const_TARGET_ALL_name = zend_string_init_interned("TARGET_ALL", sizeof("TARGET_ALL") - 1, true);

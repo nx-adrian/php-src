@@ -147,7 +147,6 @@ enum _zend_ast_kind {
 	ZEND_AST_TRAIT_PRECEDENCE,
 	ZEND_AST_TRAIT_METHOD_REFERENCE,
 	ZEND_AST_NAMESPACE,
-	ZEND_AST_MODULE,
 	ZEND_AST_USE_ELEM,
 	ZEND_AST_TRAIT_ALIAS,
 	ZEND_AST_GROUP_USE,
@@ -168,6 +167,8 @@ enum _zend_ast_kind {
 	ZEND_AST_PROP_GROUP,
 	ZEND_AST_CONST_ELEM,
 	ZEND_AST_CLASS_CONST_GROUP,
+	ZEND_AST_MODULE, /* PHP Modules: child[0]=name, child[1]=member list (NULL for a
+	                  * body-less membership/claim), child[2]=attribute list or NULL */
 
 	/* 4 child nodes */
 	ZEND_AST_FOR = 4 << ZEND_AST_NUM_CHILDREN_SHIFT,

@@ -426,7 +426,8 @@ static const char *target_names[] = {
 	"property",
 	"class constant",
 	"parameter",
-	"constant"
+	"constant",
+	"module"
 };
 
 ZEND_API zend_string *zend_get_attribute_target_names(uint32_t flags)

@@ -19,6 +19,8 @@ final class Attribute
     const int TARGET_PARAMETER = UNKNOWN;
     /** @cvalue ZEND_ATTRIBUTE_TARGET_CONST */
     const int TARGET_CONSTANT = UNKNOWN;
+    /** @cvalue ZEND_ATTRIBUTE_TARGET_MODULE */
+    const int TARGET_MODULE = UNKNOWN;
     /** @cvalue ZEND_ATTRIBUTE_TARGET_ALL */
     const int TARGET_ALL = UNKNOWN;
     /**  @cvalue ZEND_ATTRIBUTE_IS_REPEATABLE */

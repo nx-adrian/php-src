@@ -29,9 +29,13 @@
 #define ZEND_ATTRIBUTE_TARGET_CLASS_CONST	(1<<4)
 #define ZEND_ATTRIBUTE_TARGET_PARAMETER		(1<<5)
 #define ZEND_ATTRIBUTE_TARGET_CONST			(1<<6)
-#define ZEND_ATTRIBUTE_TARGET_ALL			((1<<7) - 1)
-#define ZEND_ATTRIBUTE_IS_REPEATABLE		(1<<7)
-#define ZEND_ATTRIBUTE_FLAGS				((1<<8) - 1)
+/* PHP Modules: a userland `module { }` definition block. Occupies the bit that
+ * IS_REPEATABLE previously held, so IS_REPEATABLE (and TARGET_ALL/FLAGS) shift up
+ * by one. Everything references these symbolically, so the shift is transparent. */
+#define ZEND_ATTRIBUTE_TARGET_MODULE		(1<<7)
+#define ZEND_ATTRIBUTE_TARGET_ALL			((1<<8) - 1)
+#define ZEND_ATTRIBUTE_IS_REPEATABLE		(1<<8)
+#define ZEND_ATTRIBUTE_FLAGS				((1<<9) - 1)
 
 /* Flags for zend_attribute.flags */
 #define ZEND_ATTRIBUTE_PERSISTENT   (1<<0)

@@ -8428,6 +8428,17 @@ ZEND_METHOD(ReflectionModule, getSymbolVisibility)
 	RETURN_STRING((member_ce->ce_flags2 & ZEND_ACC2_MODULE_INTERNAL) ? "internal" : "public");
 }
 
+/* Returns the attributes declared on the module's `module { }` block (stored on the
+ * module's backing class, target ZEND_ATTRIBUTE_TARGET_MODULE) — parity with
+ * ReflectionClass::getAttributes. */
+ZEND_METHOD(ReflectionModule, getAttributes)
+{
+	zend_class_entry *ce = reflection_module_backing_ce(ZEND_THIS);
+	reflect_attributes(INTERNAL_FUNCTION_PARAM_PASSTHRU,
+		ce ? ce->attributes : NULL, 0, ce, ZEND_ATTRIBUTE_TARGET_MODULE,
+		(ce && ce->type == ZEND_USER_CLASS) ? ce->info.user.filename : NULL);
+}
+
 ZEND_BEGIN_ARG_INFO_EX(arginfo_class_ReflectionModule___construct, 0, 0, 1)
 	ZEND_ARG_TYPE_INFO(0, module, IS_STRING, 0)
 ZEND_END_ARG_INFO()
@@ -8446,6 +8457,11 @@ ZEND_END_ARG_INFO()
 #define arginfo_class_ReflectionModule_getFunctions  arginfo_class_ReflectionModule_getClasses
 #define arginfo_class_ReflectionModule_getConstants  arginfo_class_ReflectionModule_getClasses
 
+ZEND_BEGIN_ARG_WITH_RETURN_TYPE_INFO_EX(arginfo_class_ReflectionModule_getAttributes, 0, 0, IS_ARRAY, 0)
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, name, IS_STRING, 1, "null")
+	ZEND_ARG_TYPE_INFO_WITH_DEFAULT_VALUE(0, flags, IS_LONG, 0, "0")
+ZEND_END_ARG_INFO()
+
 static const zend_function_entry reflection_module_functions[] = {
 	ZEND_ME(ReflectionModule, __construct, arginfo_class_ReflectionModule___construct, ZEND_ACC_PUBLIC)
 	ZEND_ME(ReflectionModule, getName, arginfo_class_ReflectionModule_getName, ZEND_ACC_PUBLIC)
@@ -8456,6 +8472,7 @@ static const zend_function_entry reflection_module_functions[] = {
 	ZEND_ME(ReflectionModule, getFunctions, arginfo_class_ReflectionModule_getFunctions, ZEND_ACC_PUBLIC)
 	ZEND_ME(ReflectionModule, getConstants, arginfo_class_ReflectionModule_getConstants, ZEND_ACC_PUBLIC)
 	ZEND_ME(ReflectionModule, getSymbolVisibility, arginfo_class_ReflectionModule_getSymbolVisibility, ZEND_ACC_PUBLIC)
+	ZEND_ME(ReflectionModule, getAttributes, arginfo_class_ReflectionModule_getAttributes, ZEND_ACC_PUBLIC)
 	ZEND_FE_END
 };
 /* }}} */

@@ -427,10 +427,10 @@ top_statement:
 		'{' top_statement_list '}'
 			{ $$ = zend_ast_create(ZEND_AST_NAMESPACE, NULL, $4); }
 	|	T_MODULE namespace_declaration_name ';'
-			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, NULL);
+			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, NULL, NULL);
 			  RESET_DOC_COMMENT(); }
 	|	T_MODULE module_qualified_name ';'
-			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, NULL);
+			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, NULL, NULL);
 			  RESET_DOC_COMMENT(); }
 			/* PHP Modules: standalone (file-level) membership in a nested module,
 			 * "module Outer::Inner;". The "::" canonical name is permitted only in these
@@ -438,10 +438,21 @@ top_statement:
 			 * imply the parent — it names the exact module this file joins/defines. */
 	|	T_MODULE namespace_declaration_name { RESET_DOC_COMMENT(); }
 		'{' module_member_list '}'
-			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, $5); }
+			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, $5, NULL); }
 	|	T_MODULE module_qualified_name { RESET_DOC_COMMENT(); }
 		'{' module_member_list '}'
-			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, $5); }
+			{ $$ = zend_ast_create(ZEND_AST_MODULE, $2, $5, NULL); }
+	|	attributes T_MODULE namespace_declaration_name { RESET_DOC_COMMENT(); }
+		'{' module_member_list '}'
+			{ $$ = zend_ast_create(ZEND_AST_MODULE, $3, $6, $1); }
+			/* PHP Modules: attributes on a top-level module *definition* block,
+			 * "#[Attr] module Foo { … }". They attach to the module's backing class
+			 * (its runtime identity) with target ZEND_ATTRIBUTE_TARGET_MODULE. Only the
+			 * block (definition) form takes attributes; membership/claim directives
+			 * ("module Foo;") do not, since they do not define the module here. */
+	|	attributes T_MODULE module_qualified_name { RESET_DOC_COMMENT(); }
+		'{' module_member_list '}'
+			{ $$ = zend_ast_create(ZEND_AST_MODULE, $3, $6, $1); }
 			/* PHP Modules: standalone definition of a nested module by its "::" canonical
 			 * name, "module Outer::Inner { … }". Inside a definition block the parent is
 			 * lexical, so nested modules use plain names and neither "::" form is reachable
@@ -1548,15 +1559,22 @@ module_member:
 	|	attributes module_member_inner
 			{ zend_ast *d = $2->child[0];
 			  /* Attributes attach to an *inline* member declaration exactly as they do
-			   * outside a module. Forward-declared members (a body-less claim, or a
-			   * nested-module claim/definition) have no declaration to carry them. */
-			  if (d->kind == ZEND_AST_MODULE || d->kind == ZEND_AST_MODULE_CLAIM) {
+			   * outside a module. A nested module *definition* block carries them on its
+			   * own attribute slot (compiled onto its backing class with target MODULE);
+			   * a body-less claim (class-like or nested-module forward declaration) has no
+			   * definition here to carry them. */
+			  if (d->kind == ZEND_AST_MODULE && d->child[1] != NULL) {
+				  d->child[2] = $1;
+				  $$ = $2;
+			  } else if (d->kind == ZEND_AST_MODULE || d->kind == ZEND_AST_MODULE_CLAIM) {
 				  zend_error_noreturn(E_COMPILE_ERROR,
-					  "Attributes are not supported on a forward-declared or nested module member; "
+					  "Attributes are not supported on a forward-declared or nested module claim; "
 					  "place them on the member's definition instead");
+			  } else {
+				  $2->child[0] = zend_ast_with_attributes(d, $1);
+				  $$ = $2;
 			  }
-			  $2->child[0] = zend_ast_with_attributes(d, $1);
-			  $$ = $2; }
+			}
 ;
 
 module_member_inner:
@@ -1586,10 +1604,10 @@ module_member_inner:
 			  p->attr = ZEND_ACC_PUBLIC | ZEND_ACC_STATIC;
 			  $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, p); }
 	|	member_visibility T_MODULE namespace_declaration_name { RESET_DOC_COMMENT(); } '{' module_member_list '}'
-			{ zend_ast *m = zend_ast_create(ZEND_AST_MODULE, $3, $6);
+			{ zend_ast *m = zend_ast_create(ZEND_AST_MODULE, $3, $6, NULL);
 			  $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, m); }
 	|	member_visibility T_MODULE namespace_declaration_name ';'
-			{ zend_ast *m = zend_ast_create(ZEND_AST_MODULE, $3, NULL);
+			{ zend_ast *m = zend_ast_create(ZEND_AST_MODULE, $3, NULL, NULL);
 			  $$ = zend_ast_create_ex(ZEND_AST_MODULE_MEMBER, $1, m); }
 			/* PHP Modules: a body-less claim of a NESTED MODULE — the enclosing module
 			 * forward-declares "Inner" (defined in its own file). A MODULE node with a

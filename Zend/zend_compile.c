@@ -11074,6 +11074,24 @@ static void zend_compile_module(const zend_ast *ast) /* {{{ */
 		/* Restore the enclosing module scope (NULL at top level; the parent's
 		 * canonical name when this was a nested module). */
 		FC(current_module) = parent_module;
+
+		/* Module-level attributes (MODULE node child[2]) are written in the *enclosing*
+		 * scope, lexically before "module Foo { … }", so their class names must resolve
+		 * there — not module-relative. Compile them onto the backing class now that
+		 * current_module has been restored to the enclosing scope, with target
+		 * ZEND_ATTRIBUTE_TARGET_MODULE. The backing class was early-bound during the
+		 * compile above, so it is resolvable by its (plain) name. */
+		if (ast->child[2]) {
+			zend_string *lc_backing = zend_string_tolower(name);
+			zend_class_entry *bce = zend_hash_find_ptr(CG(class_table), lc_backing);
+			zend_string_release(lc_backing);
+			ZEND_ASSERT(bce && (bce->ce_flags & ZEND_ACC_MODULE));
+			zend_class_entry *prev_ce = CG(active_class_entry);
+			CG(active_class_entry) = bce;
+			zend_compile_attributes(&bce->attributes, ast->child[2], 0,
+				ZEND_ATTRIBUTE_TARGET_MODULE, 0);
+			CG(active_class_entry) = prev_ce;
+		}
 	} else if (parent_module) {
 		/* A membership declaration (no block, `module Foo;`) leaves current_module set
 		 * for the rest of the file. When one supersedes another via chained membership

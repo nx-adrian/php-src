@@ -7,4 +7,4 @@ module M {
 }
 ?>
 --EXPECTF--
-Fatal error: Attributes are not supported on a forward-declared or nested module member; place them on the member's definition instead in %s on line %d
+Fatal error: Attributes are not supported on a forward-declared or nested module claim; place them on the member's definition instead in %s on line %d
