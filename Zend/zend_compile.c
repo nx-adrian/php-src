@@ -12438,8 +12438,23 @@ static void zend_compile_const_expr_class_const(zend_ast **ast_ptr) /* {{{ */
 	int fetch_type;
 
 	if (class_ast->kind != ZEND_AST_ZVAL) {
-		zend_error_noreturn(E_COMPILE_ERROR,
-			"Dynamic class names are not allowed in compile-time class constant references");
+		/* PHP Modules: a module member-class chain used as the class of a compile-time
+		 * class-constant reference (`M::C::CONST`, or the in-module self form
+		 * `module::C::CONST`) folds to its canonical class name, exactly as it does at
+		 * runtime and for `::class` (see zend_compile_const_expr_class_name). Without
+		 * this, a member-class enum case or class constant could not be used as a
+		 * parameter default / property initializer / const value. */
+		zend_string *module_chain = zend_try_module_chain_class(class_ast);
+		if (module_chain) {
+			zend_ast_destroy(class_ast);
+			zval zv;
+			ZVAL_STR(&zv, module_chain);
+			class_ast = zend_ast_create_zval(&zv);
+			ast->child[0] = class_ast;
+		} else {
+			zend_error_noreturn(E_COMPILE_ERROR,
+				"Dynamic class names are not allowed in compile-time class constant references");
+		}
 	}
 	if (Z_TYPE_P(zend_ast_get_zval(class_ast)) != IS_STRING) {
 		zend_throw_error(NULL, "Class name must be a valid object or a string");
